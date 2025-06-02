@@ -13,13 +13,14 @@ const unsigned int SCR_WIDTH = 800;
 const unsigned int SCR_HEIGHT = 600;
 
 
-float vertices[] = {
-     0.5f,  0.5f, 0.0f,  // top right
-     0.5f, -0.5f, 0.0f,  // bottom right
-    -0.5f, -0.5f, 0.0f,  // bottom left
-    -0.5f,  0.5f, 0.0f   // top left
-};
 
+float vertices[] = {
+    // posiciones         // colores
+     0.5f,  0.5f, 0.0f,   1.0f, 0.0f, 0.0f,  // top right
+     0.5f, -0.5f, 0.0f,   0.0f, 1.0f, 0.0f,  // bottom right
+    -0.5f, -0.5f, 0.0f,   0.0f, 0.0f, 1.0f,  // bottom left
+    -0.5f,  0.5f, 0.0f,   1.0f, 1.0f, 0.0f   // top left
+};
 unsigned int indices[] = {  // note that we start from 0!
     0, 1, 3,   // first triangle
     1, 2, 3    // second triangle
@@ -73,20 +74,26 @@ int main()
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
 
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+    // Indice del vertex, cantidad de elementos por vertice, tipo de datos,
+    //
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3* sizeof(float)));
+    glEnableVertexAttribArray(1);
 
+    // Desbindea el VAO 0, que es el unico que cree. Es un ID que creo glGenVertexArrays y es creciente.
     glBindVertexArray(0);
 
-    const char* vertexFilePath = "src/shaders/vertex.glsl";
     // TODO: Entender por que si directamente hago un uint* y se lo poas al compile_shader,
     // luego al querer usar  en el link shader mediante *vertexShaderID no me funca.
+    const char* vertexFilePath = "src/shaders/vertex.glsl";
     unsigned int vertexShaderID;
     compile_shader(&vertexShaderID, GL_VERTEX_SHADER, vertexFilePath);
 
     const char* fragmentFilePath = "src/shaders/fragment.glsl";
     unsigned int fragmentShaderID;
     compile_shader(&fragmentShaderID, GL_FRAGMENT_SHADER, fragmentFilePath);
+
     GLuint shaderProgram = link_shader(vertexShaderID, fragmentShaderID);
 
 
@@ -101,10 +108,15 @@ int main()
         glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
+        float timeValue = glfwGetTime();
+        float greenValue = (sin(timeValue) / 2.0f) + 0.5f;
+        int vertexColorLocation = glGetUniformLocation(shaderProgram, "ourColor");
         glUseProgram(shaderProgram);
+        glUniform4f(vertexColorLocation, 0.0f, greenValue, 0.0f, 1.0f);
+
         glBindVertexArray(VAO);
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+        glDrawElements(GL_TRIANGLES, 12, GL_UNSIGNED_INT, 0);
         // glfw: swap buffers and poll IO events (keys pressed/released, mouse moved etc.)
         // -------------------------------------------------------------------------------
         glfwSwapBuffers(window);
