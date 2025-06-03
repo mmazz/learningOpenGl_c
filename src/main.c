@@ -1,6 +1,7 @@
 #include "glad/gl.h"
 #include "shader.h"
 #include "texture.h"
+#include "camera.h"
 #include <GLFW/glfw3.h>
 #include <cglm/affine.h> // para funciones como glm_rotate, glm_scale
 #include <cglm/cglm.h>
@@ -96,9 +97,89 @@ vec3 cubePositions[] = {
     { -1.3f,  1.0f, -1.5f }
 };
 
+float deltaTime = 0.0f;	// time between current frame and last frame
+float lastFrame = 0.0f;
+
+// Vectores de cámara
+vec3 cameraPos   = {0.0f, 0.0f, 3.0f};
+vec3 cameraFront = {0.0f, 0.0f, -1.0f};
+vec3 cameraUp    = {0.0f, 1.0f,  0.0f};
+
+// Variables de entrada del mouse
+float yaw   = -90.0f;  // rotación horizontal
+float pitch =   0.0f;  // rotación vertical
+
+
+// Campo de visión
+float fov = 45.0f;
+static float lastX = 800.0f / 2.0f;
+static float lastY = 600.0f / 2.0f;
+static bool firstMouse = true;
+static bool constrainPitch = false;
+Camera camera;
+
+void processInput(GLFWwindow *window)
+{
+    if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+        glfwSetWindowShouldClose(window, true);
+
+    float cameraSpeed = 2.5f * deltaTime;
+
+    vec3 temp;
+
+    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
+        glm_vec3_scale(cameraFront, cameraSpeed, temp);
+        glm_vec3_add(cameraPos, temp, cameraPos);
+    }
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
+        glm_vec3_scale(cameraFront, cameraSpeed, temp);
+        glm_vec3_sub(cameraPos, temp, cameraPos);
+    }
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
+        vec3 cross;
+        glm_vec3_cross(cameraFront, cameraUp, cross);
+        glm_vec3_normalize(cross);
+        glm_vec3_scale(cross, cameraSpeed, temp);
+        glm_vec3_sub(cameraPos, temp, cameraPos);
+    }
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
+        vec3 cross;
+        glm_vec3_cross(cameraFront, cameraUp, cross);
+        glm_vec3_normalize(cross);
+        glm_vec3_scale(cross, cameraSpeed, temp);
+        glm_vec3_add(cameraPos, temp, cameraPos);
+    }
+}
+void mouse_callback(GLFWwindow* window, double xpos, double ypos)
+{
+    if (firstMouse) {
+        lastX = (float)xpos;
+        lastY = (float)ypos;
+        firstMouse = false;
+        return;
+    }
+
+    float xoffset = (float)xpos - lastX;
+    float yoffset = lastY - (float)ypos;  // el eje Y está invertido
+
+    lastX = (float)xpos;
+    lastY = (float)ypos;
+   camera_process_mouse(&camera, xoffset, yoffset, constrainPitch);
+}
+
+void scroll_callback(GLFWwindow* window, double xoffset, double yoffset)
+{
+    camera_process_scroll(&camera,yoffset);
+}
+
+void framebuffer_size_callback(GLFWwindow *window, int width, int height) {
+  // make sure the viewport matches the new window dimensions; note that width
+  // and height will be significantly larger than specified on retina displays.
+  glViewport(0, 0, width, height);
+}
+
+
 int main() {
-  // glfw: initialize and configure
-  // ------------------------------
   glfwInit();
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
@@ -108,8 +189,6 @@ int main() {
   glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 #endif
 
-  // glfw window creation
-  // --------------------
   GLFWwindow *window =
       glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "LearnOpenGL", NULL, NULL);
   if (window == NULL) {
@@ -119,13 +198,16 @@ int main() {
   }
   glfwMakeContextCurrent(window);
   glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+  glfwSetCursorPosCallback(window, mouse_callback);
+  glfwSetScrollCallback(window, scroll_callback);
+  glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
-  // glad: load all OpenGL function pointers
-  // ---------------------------------------
   if (!gladLoadGL((GLADloadfunc)glfwGetProcAddress)) {
     printf("Failed to initialize GLAD");
     return -1;
   }
+  camera_init(&camera, cameraPos, cameraUp, yaw, pitch);
+
   unsigned int VBO, VAO, EBO;
   glGenVertexArrays(1, &VAO);
   glGenBuffers(1, &VBO);
@@ -141,8 +223,6 @@ int main() {
                GL_STATIC_DRAW);
 
   // Indice del vertex, cantidad de elementos por vertice, tipo de datos,
-  //
-
     // position attribute
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
@@ -189,10 +269,13 @@ int main() {
   glUniform1i(glGetUniformLocation(shaderProgram, "texture1"), 0);
   glUniform1i(glGetUniformLocation(shaderProgram, "texture2"), 1);
 
+
     //habilito el z-depth
   glEnable(GL_DEPTH_TEST);
   while (!glfwWindowShouldClose(window)) {
-    // input
+    float currentFrame = glfwGetTime();
+    deltaTime = currentFrame - lastFrame;
+    lastFrame = currentFrame;
     // -----
     processInput(window);
 
@@ -208,21 +291,24 @@ int main() {
     glBindTexture(GL_TEXTURE_2D, texture2);
 
     glUseProgram(shaderProgram);
-    mat4 view;
-    glm_mat4_identity(view);
+//    glm_mat4_identity(view);
     // note that we're translating the scene in the reverse direction of where
     // we want to move
-    glm_translate(view, (vec3){0.0f, 0.0f, -3.0f});
-    mat4 projection;
-    glm_perspective(glm_rad(45.0f), 800.0f / 600.0f, 0.1f, 100.0f, projection);
+ //   glm_translate(view, (vec3){0.0f, 0.0f, -3.0f});
 
-    unsigned int viewLoc = glGetUniformLocation(shaderProgram, "view");
-    glUniformMatrix4fv(viewLoc, 1, GL_FALSE, (float *)view);
+    mat4 projection;
+    glm_perspective(glm_rad(camera.Zoom), (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 100.0f, projection);
+
     unsigned int projLoc = glGetUniformLocation(shaderProgram, "projection");
     glUniformMatrix4fv(projLoc, 1, GL_FALSE, (float *)projection);
 
-    glBindVertexArray(VAO);
+    mat4 view;
+    camera_get_view_matrix(&camera, view);
 
+    unsigned int viewLoc = glGetUniformLocation(shaderProgram, "view");
+    glUniformMatrix4fv(viewLoc, 1, GL_FALSE, (float *)view);
+
+    glBindVertexArray(VAO);
     for(unsigned int i = 0; i < 10; i++)
     {
         mat4 model;
@@ -257,16 +343,8 @@ int main() {
 // process all input: query GLFW whether relevant keys are pressed/released this
 // frame and react accordingly
 // ---------------------------------------------------------------------------------------------------------
-void processInput(GLFWwindow *window) {
-  if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
-    glfwSetWindowShouldClose(window, true);
-}
 
 // glfw: whenever the window size changed (by OS or user resize) this callback
 // function executes
 // ---------------------------------------------------------------------------------------------
-void framebuffer_size_callback(GLFWwindow *window, int width, int height) {
-  // make sure the viewport matches the new window dimensions; note that width
-  // and height will be significantly larger than specified on retina displays.
-  glViewport(0, 0, width, height);
-}
+
