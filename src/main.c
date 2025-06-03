@@ -3,7 +3,9 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <cglm/cglm.h>
+#include <cglm/affine.h>  // para funciones como glm_rotate, glm_scale
 #include "shader.h"
+#include "texture.h"
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 void processInput(GLFWwindow *window);
@@ -15,12 +17,13 @@ const unsigned int SCR_HEIGHT = 600;
 
 
 float vertices[] = {
-    // posiciones         // colores
-     0.5f,  0.5f, 0.0f,   1.0f, 0.0f, 0.0f,  // top right
-     0.5f, -0.5f, 0.0f,   0.0f, 1.0f, 0.0f,  // bottom right
-    -0.5f, -0.5f, 0.0f,   0.0f, 0.0f, 1.0f,  // bottom left
-    -0.5f,  0.5f, 0.0f,   1.0f, 1.0f, 0.0f   // top left
+    // positions          // colors           // texture coords
+     0.5f,  0.5f, 0.0f,   1.0f, 0.0f, 0.0f,   1.0f, 1.0f,   // top right
+     0.5f, -0.5f, 0.0f,   0.0f, 1.0f, 0.0f,   1.0f, 0.0f,   // bottom right
+    -0.5f, -0.5f, 0.0f,   0.0f, 0.0f, 1.0f,   0.0f, 0.0f,   // bottom left
+    -0.5f,  0.5f, 0.0f,   1.0f, 1.0f, 0.0f,   0.0f, 1.0f    // top left
 };
+
 unsigned int indices[] = {  // note that we start from 0!
     0, 1, 3,   // first triangle
     1, 2, 3    // second triangle
@@ -76,10 +79,14 @@ int main()
 
     // Indice del vertex, cantidad de elementos por vertice, tipo de datos,
     //
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3* sizeof(float)));
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3* sizeof(float)));
     glEnableVertexAttribArray(1);
+
+    // For texture
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
+    glEnableVertexAttribArray(2);
 
     // Desbindea el VAO 0, que es el unico que cree. Es un ID que creo glGenVertexArrays y es creciente.
     glBindVertexArray(0);
@@ -96,6 +103,16 @@ int main()
 
     GLuint shaderProgram = link_shader(vertexShaderID, fragmentShaderID);
 
+    unsigned int texture1;
+    const char* texture_file = "assets/wall.jpg";
+    load_texture(&texture1, texture_file);
+    unsigned int texture2;
+    texture_file = "assets/awesomeface.png";
+    load_texture(&texture2, texture_file);
+
+    glUseProgram(shaderProgram);
+    glUniform1i(glGetUniformLocation(shaderProgram, "texture1"), 0);
+    glUniform1i(glGetUniformLocation(shaderProgram, "texture2"), 1);
 
     while (!glfwWindowShouldClose(window))
     {
@@ -107,16 +124,32 @@ int main()
         // ------
         glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
-
         float timeValue = glfwGetTime();
         float greenValue = (sin(timeValue) / 2.0f) + 0.5f;
         int vertexColorLocation = glGetUniformLocation(shaderProgram, "ourColor");
+
+        mat4 trans;
+        glm_mat4_identity(trans);  // Equivale a glm::mat4(1.0f)
+        glm_translate(trans, (vec3){0.5f, -0.5f, 0.0f});
+        // Rotar 90 grados alrededor del eje Z
+        glm_rotate(trans, (float)glfwGetTime(), (vec3){0.0f, 0.0f, 1.0f});
+
+        // Escalar por 0.5 en X, Y y Z
+        glm_scale(trans, (vec3){0.5f, 0.5f, 0.5f});
+        unsigned int transformLoc = glGetUniformLocation(shaderProgram, "transform");
+        glUniformMatrix4fv(transformLoc, 1, GL_FALSE, (float *)trans);
+
         glUseProgram(shaderProgram);
         glUniform4f(vertexColorLocation, 0.0f, greenValue, 0.0f, 1.0f);
 
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, texture1);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, texture2);
+
         glBindVertexArray(VAO);
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-        glDrawElements(GL_TRIANGLES, 12, GL_UNSIGNED_INT, 0);
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
         // glfw: swap buffers and poll IO events (keys pressed/released, mouse moved etc.)
         // -------------------------------------------------------------------------------
         glfwSwapBuffers(window);
@@ -124,6 +157,7 @@ int main()
     }
     glDeleteVertexArrays(1, &VAO);
     glDeleteBuffers(1, &VBO);
+    glDeleteBuffers(1, &EBO);
     glDeleteProgram(shaderProgram);
     // glfw: terminate, clearing all previously allocated GLFW resources.
     // ------------------------------------------------------------------
