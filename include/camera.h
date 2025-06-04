@@ -35,7 +35,7 @@ typedef struct {
 } Camera;
 
 // Funciones públicas
-void camera_init(Camera* camera, vec3 position, vec3 up, float yaw, float pitch);
+Camera * camera_init(vec3 position, vec3 up, float yaw, float pitch);
 void camera_get_view_matrix(Camera* camera, mat4 dest);
 void camera_process_keyboard(Camera* camera, Camera_Movement direction, float deltaTime);
 void camera_process_mouse(Camera* camera, float xoffset, float yoffset, bool constrainPitch);

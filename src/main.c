@@ -8,10 +8,6 @@
 #include <stdbool.h>
 #include <stdio.h>
 
-void framebuffer_size_callback(GLFWwindow *window, int width, int height);
-void processInput(GLFWwindow *window);
-
-// settings
 const unsigned int SCR_WIDTH = 800;
 const unsigned int SCR_HEIGHT = 600;
 
@@ -97,61 +93,40 @@ vec3 cubePositions[] = {
     { -1.3f,  1.0f, -1.5f }
 };
 
-float deltaTime = 0.0f;	// time between current frame and last frame
-float lastFrame = 0.0f;
+float deltaTime = 0.f;
+float lastFrame = 0.f;
 
 // Vectores de cámara
 vec3 cameraPos   = {0.0f, 0.0f, 3.0f};
 vec3 cameraFront = {0.0f, 0.0f, -1.0f};
 vec3 cameraUp    = {0.0f, 1.0f,  0.0f};
 
-// Variables de entrada del mouse
-float yaw   = -90.0f;  // rotación horizontal
-float pitch =   0.0f;  // rotación vertical
 
 
 // Campo de visión
-float fov = 45.0f;
 static float lastX = 800.0f / 2.0f;
 static float lastY = 600.0f / 2.0f;
 static bool firstMouse = true;
 static bool constrainPitch = false;
-Camera camera;
 
-void processInput(GLFWwindow *window)
-{
+void processInput(GLFWwindow* window, float deltaTime) {
+    Camera* camera = (Camera*)glfwGetWindowUserPointer(window);
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
 
-    float cameraSpeed = 2.5f * deltaTime;
-
-    vec3 temp;
-
-    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
-        glm_vec3_scale(cameraFront, cameraSpeed, temp);
-        glm_vec3_add(cameraPos, temp, cameraPos);
-    }
-    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
-        glm_vec3_scale(cameraFront, cameraSpeed, temp);
-        glm_vec3_sub(cameraPos, temp, cameraPos);
-    }
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
-        vec3 cross;
-        glm_vec3_cross(cameraFront, cameraUp, cross);
-        glm_vec3_normalize(cross);
-        glm_vec3_scale(cross, cameraSpeed, temp);
-        glm_vec3_sub(cameraPos, temp, cameraPos);
-    }
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
-        vec3 cross;
-        glm_vec3_cross(cameraFront, cameraUp, cross);
-        glm_vec3_normalize(cross);
-        glm_vec3_scale(cross, cameraSpeed, temp);
-        glm_vec3_add(cameraPos, temp, cameraPos);
-    }
+    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+        camera_process_keyboard(camera, CAMERA_FORWARD, deltaTime);
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+        camera_process_keyboard(camera, CAMERA_BACKWARD, deltaTime);
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+        camera_process_keyboard(camera, CAMERA_LEFT, deltaTime);
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+        camera_process_keyboard(camera, CAMERA_RIGHT, deltaTime);
 }
+
 void mouse_callback(GLFWwindow* window, double xpos, double ypos)
 {
+    Camera* camera = (Camera*)glfwGetWindowUserPointer(window);
     if (firstMouse) {
         lastX = (float)xpos;
         lastY = (float)ypos;
@@ -164,49 +139,50 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos)
 
     lastX = (float)xpos;
     lastY = (float)ypos;
-   camera_process_mouse(&camera, xoffset, yoffset, constrainPitch);
+   camera_process_mouse(camera, xoffset, yoffset, constrainPitch);
 }
 
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset)
 {
-    camera_process_scroll(&camera,yoffset);
+    Camera* camera = (Camera*)glfwGetWindowUserPointer(window);
+    camera_process_scroll(camera, yoffset);
 }
 
 void framebuffer_size_callback(GLFWwindow *window, int width, int height) {
-  // make sure the viewport matches the new window dimensions; note that width
-  // and height will be significantly larger than specified on retina displays.
   glViewport(0, 0, width, height);
 }
 
-
-int main() {
+int init_glad(){
+  if (!gladLoadGL((GLADloadfunc)glfwGetProcAddress)) {
+    printf("Failed to initialize GLAD");
+    return -1;
+  }
+    return 0;
+}
+GLFWwindow *init_window(int width, int height, const char* title){
   glfwInit();
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-
-#ifdef __APPLE__
-  glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
-#endif
-
-  GLFWwindow *window =
-      glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "LearnOpenGL", NULL, NULL);
+  GLFWwindow *window = glfwCreateWindow(width, height, title, NULL, NULL);
   if (window == NULL) {
     printf("Failed to create GLFW window");
     glfwTerminate();
-    return -1;
+    return NULL;
   }
   glfwMakeContextCurrent(window);
+    return window;
+}
+int main() {
+  GLFWwindow* window = init_window(SCR_WIDTH, SCR_HEIGHT, "Simulator");
+  Camera* camera = camera_init(cameraPos, cameraUp, YAW, PITCH);
+  glfwSetWindowUserPointer(window, camera);
   glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
   glfwSetCursorPosCallback(window, mouse_callback);
   glfwSetScrollCallback(window, scroll_callback);
   glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
-  if (!gladLoadGL((GLADloadfunc)glfwGetProcAddress)) {
-    printf("Failed to initialize GLAD");
-    return -1;
-  }
-  camera_init(&camera, cameraPos, cameraUp, yaw, pitch);
+  init_glad();
 
   unsigned int VBO, VAO, EBO;
   glGenVertexArrays(1, &VAO);
@@ -222,32 +198,15 @@ int main() {
   glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices,
                GL_STATIC_DRAW);
 
-  // Indice del vertex, cantidad de elementos por vertice, tipo de datos,
-    // position attribute
+
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
-    // texture coord attribute
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
     glEnableVertexAttribArray(1);
-    //  Deje de usar coordenada de color
-    //  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)0);
-  //glEnableVertexAttribArray(0);
-//  glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float),
-//                        (void *)(3 * sizeof(float)));
-//  glEnableVertexAttribArray(1);
-//
-//  // For texture
-//  glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float),
-//                        (void *)(6 * sizeof(float)));
-//  glEnableVertexAttribArray(2);
 
-  // Desbindea el VAO 0, que es el unico que cree. Es un ID que creo
-  // glGenVertexArrays y es creciente.
   glBindVertexArray(0);
 
-  // TODO: Entender por que si directamente hago un uint* y se lo poas al
-  // compile_shader, luego al querer usar  en el link shader mediante
-  // *vertexShaderID no me funca.
+
   const char *vertexFilePath = "src/shaders/vertex.glsl";
   unsigned int vertexShaderID;
   compile_shader(&vertexShaderID, GL_VERTEX_SHADER, vertexFilePath);
@@ -277,12 +236,11 @@ int main() {
     deltaTime = currentFrame - lastFrame;
     lastFrame = currentFrame;
     // -----
-    processInput(window);
+    processInput(window, deltaTime);
 
     // render
     // ------
     glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
-    // borro no solo el buffer de color si no el depth buffer antes de cada dibujo
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     glActiveTexture(GL_TEXTURE0);
@@ -291,19 +249,16 @@ int main() {
     glBindTexture(GL_TEXTURE_2D, texture2);
 
     glUseProgram(shaderProgram);
-//    glm_mat4_identity(view);
-    // note that we're translating the scene in the reverse direction of where
-    // we want to move
- //   glm_translate(view, (vec3){0.0f, 0.0f, -3.0f});
+
 
     mat4 projection;
-    glm_perspective(glm_rad(camera.Zoom), (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 100.0f, projection);
+    glm_perspective(glm_rad(camera->Zoom), (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 100.0f, projection);
 
     unsigned int projLoc = glGetUniformLocation(shaderProgram, "projection");
     glUniformMatrix4fv(projLoc, 1, GL_FALSE, (float *)projection);
 
     mat4 view;
-    camera_get_view_matrix(&camera, view);
+    camera_get_view_matrix(camera, view);
 
     unsigned int viewLoc = glGetUniformLocation(shaderProgram, "view");
     glUniformMatrix4fv(viewLoc, 1, GL_FALSE, (float *)view);
@@ -325,8 +280,6 @@ int main() {
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
 
 
-    // glfw: swap buffers and poll IO events (keys pressed/released, mouse moved etc.)
-    // -------------------------------------------------------------------------------
     glfwSwapBuffers(window);
     glfwPollEvents();
   }
@@ -334,17 +287,7 @@ int main() {
   glDeleteBuffers(1, &VBO);
   glDeleteBuffers(1, &EBO);
   glDeleteProgram(shaderProgram);
-  // glfw: terminate, clearing all previously allocated GLFW resources.
-  // ------------------------------------------------------------------
   glfwTerminate();
   return 0;
 }
-
-// process all input: query GLFW whether relevant keys are pressed/released this
-// frame and react accordingly
-// ---------------------------------------------------------------------------------------------------------
-
-// glfw: whenever the window size changed (by OS or user resize) this callback
-// function executes
-// ---------------------------------------------------------------------------------------------
 
