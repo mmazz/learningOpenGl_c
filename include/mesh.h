@@ -1,9 +1,11 @@
 #ifndef MESH_H
 #define MESH_H
 
+#include <cglm/cglm.h>
 #include <stddef.h>
 #include <glad/gl.h>
 #include <stdlib.h>
+
 // Estructura que representa una malla con atributos interleaved
 typedef struct {
     float*    vertices;      // arreglo de floats: posición (3) + UV (2) interleaved
@@ -15,6 +17,13 @@ typedef struct {
     GLuint    VAO, VBO, EBO; // identificadores OpenGL
 } Mesh;
 
+typedef struct {
+    vec3 position;
+    float scale;
+    Mesh* mesh;
+} RenderObject;
+
+
 /**
  * Genera una malla de cubo centrado en el origen con lado 1.0.
  * - Allocates y llena m.vertices e m.indices.
@@ -24,5 +33,5 @@ typedef struct {
  * para subirla a la GPU, y mesh_destroy(&mesh) para liberar.
  */
 Mesh mesh_generate_cube(void);
-
+Mesh mesh_generate_sphere(int latDiv, int lonDiv);
 #endif // MESH_H

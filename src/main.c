@@ -49,10 +49,12 @@ void framebuffer_size_callback(GLFWwindow *window, int width, int height);
 bool init_glad();
 void init_buffers(unsigned int *VAO, unsigned int *VBO, unsigned int *EBO, float *vertices, size_t vertices_size, unsigned int *indices, size_t indices_size);
 void init_texture(GLuint shaderProgram, GLuint *tex, const char *path, const char *uniformName, int textureUnit);
-void render_scene(GLuint shaderProgram, Camera *camera, GLuint VAO, GLuint EBO);
+
+void render_scene(GLuint shaderProgram, Camera *camera, Mesh mesh);
 GLuint init_shader_program(const char *vertexPath, const char *fragmentPath);
 GLFWwindow *setup_window(int width, int height, const char* title, Camera* camera);
 
+void del_buffers(Mesh* mesh);
 int main() {
     Camera camera = camera_init(cameraPos, cameraUp, YAW, PITCH);
     GLFWwindow* window = setup_window(SCR_WIDTH, SCR_HEIGHT, "Simulator", &camera);
@@ -66,9 +68,11 @@ int main() {
     }
     glEnable(GL_DEPTH_TEST);
   //  GLuint VAO, VBO, EBO;
-    Mesh cube = mesh_generate_cube();
+  //  Mesh cube = mesh_generate_cube();
+    Mesh sphere = mesh_generate_sphere(20, 20);
 
-    init_buffers(&cube.VAO, &cube.VBO, &cube.EBO, cube.vertices, cube.vertexSize, cube.indices, cube.indexSize);
+   // init_buffers(&cube.VAO, &cube.VBO, &cube.EBO, cube.vertices, cube.vertexSize, cube.indices, cube.indexSize);
+    init_buffers(&sphere.VAO, &sphere.VBO, &sphere.EBO, sphere.vertices, sphere.vertexSize, sphere.indices, sphere.indexSize);
 
     GLuint shaderProgram = init_shader_program("src/shaders/vertex.glsl", "src/shaders/fragment.glsl");
     GLuint texture1, texture2;
@@ -89,21 +93,27 @@ int main() {
         glBindTexture(GL_TEXTURE_2D, texture1);
         glActiveTexture(GL_TEXTURE1);
         glBindTexture(GL_TEXTURE_2D, texture2);
-        render_scene(shaderProgram, &camera, cube.VAO, cube.EBO);
+     //   render_scene(shaderProgram, &camera, cube.VAO, cube.EBO);
+        render_scene(shaderProgram, &camera, sphere);
 
 
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
+    //del_buffers(&cube);
+    del_buffers(&sphere);
 
-    glDeleteVertexArrays(1, &cube.VAO);
-    glDeleteBuffers(1, &cube.VBO);
-    glDeleteBuffers(1, &cube.EBO);
+
     glDeleteProgram(shaderProgram);
     glfwTerminate();
     return 0;
 }
 
+void del_buffers(Mesh* mesh){
+    glDeleteVertexArrays(1, &mesh->VAO);
+    glDeleteBuffers(1, &mesh->VBO);
+    glDeleteBuffers(1, &mesh->EBO);
+}
 void processInput(GLFWwindow* window, float deltaTime) {
     Camera* camera = (Camera*)glfwGetWindowUserPointer(window);
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
@@ -217,7 +227,7 @@ void init_texture(GLuint shaderProgram, GLuint *tex, const char *path, const cha
     }
 }
 
-void render_scene(GLuint shaderProgram, Camera *camera, GLuint VAO, GLuint EBO) {
+void render_scene(GLuint shaderProgram, Camera *camera, Mesh mesh) {
     glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -233,7 +243,7 @@ void render_scene(GLuint shaderProgram, Camera *camera, GLuint VAO, GLuint EBO) 
     glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "view"), 1, GL_FALSE, (float *)view);
 
     // Modelado y dibujado
-    glBindVertexArray(VAO);
+    glBindVertexArray(mesh.VAO);
     for (unsigned int i = 0; i < 10; i++) {
         mat4 model;
         glm_mat4_identity(model);
@@ -243,7 +253,7 @@ void render_scene(GLuint shaderProgram, Camera *camera, GLuint VAO, GLuint EBO) 
         glm_rotate(model, glfwGetTime() * glm_rad(angle), (vec3){1.0f, 0.3f, 0.5f});
         glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "model"), 1, GL_FALSE, (float *)model);
 
-        glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
+        glDrawElements(GL_TRIANGLES, mesh.indexCount, GL_UNSIGNED_INT, 0);
     }
     glBindVertexArray(0);
 }
