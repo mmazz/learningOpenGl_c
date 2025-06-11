@@ -2,7 +2,7 @@
 #include "shader.h"
 #include "texture.h"
 #include "camera.h"
-#include "data.h"
+#include "mesh.h"
 #include <GLFW/glfw3.h>
 #include <cglm/affine.h> // para funciones como glm_rotate, glm_scale
 #include <cglm/cglm.h>
@@ -12,9 +12,7 @@
 const unsigned int SCR_WIDTH = 800;
 const unsigned int SCR_HEIGHT = 600;
 
-extern float vertices[];
-extern unsigned int indices[];
-extern vec3 cubePositions[];
+
 
 float deltaTime = 0.f;
 float lastFrame = 0.f;
@@ -30,6 +28,19 @@ static float lastY = 600.0f / 2.0f;
 static bool firstMouse = true;
 static bool constrainPitch = false;
 
+vec3 cubePositions[] = {
+    {  0.0f,  0.0f,  0.0f },
+    {  2.0f,  5.0f, -15.0f },
+    { -1.5f, -2.2f, -2.5f },
+    { -3.8f, -2.0f, -12.3f },
+    {  2.4f, -0.4f, -3.5f },
+    { -1.7f,  3.0f, -7.5f },
+    {  1.3f, -2.0f, -2.5f },
+    {  1.5f,  2.0f, -2.5f },
+    {  1.5f,  0.2f, -1.5f },
+    { -1.3f,  1.0f, -1.5f }
+};
+
 
 void processInput(GLFWwindow* window, float deltaTime);
 void mouse_callback(GLFWwindow* window, double xpos, double ypos);
@@ -40,11 +51,11 @@ void init_buffers(unsigned int *VAO, unsigned int *VBO, unsigned int *EBO, float
 void init_texture(GLuint shaderProgram, GLuint *tex, const char *path, const char *uniformName, int textureUnit);
 void render_scene(GLuint shaderProgram, Camera *camera, GLuint VAO, GLuint EBO);
 GLuint init_shader_program(const char *vertexPath, const char *fragmentPath);
-GLFWwindow *setup_window_and_camera(int width, int height, const char* title, Camera** out_camera);
+GLFWwindow *setup_window(int width, int height, const char* title, Camera* camera);
 
 int main() {
-    Camera* camera = NULL;
-    GLFWwindow* window = setup_window_and_camera(SCR_WIDTH, SCR_HEIGHT, "Simulator", &camera);
+    Camera camera = camera_init(cameraPos, cameraUp, YAW, PITCH);
+    GLFWwindow* window = setup_window(SCR_WIDTH, SCR_HEIGHT, "Simulator", &camera);
     if (!window) {
         printf("No windows created");
         return -1;
@@ -54,8 +65,10 @@ int main() {
         return -1;
     }
     glEnable(GL_DEPTH_TEST);
-    GLuint VAO, VBO, EBO;
-    init_buffers(&VAO, &VBO, &EBO, vertices, sizeof(vertices), indices, sizeof(indices));
+  //  GLuint VAO, VBO, EBO;
+    Mesh cube = mesh_generate_cube();
+
+    init_buffers(&cube.VAO, &cube.VBO, &cube.EBO, cube.vertices, cube.vertexSize, cube.indices, cube.indexSize);
 
     GLuint shaderProgram = init_shader_program("src/shaders/vertex.glsl", "src/shaders/fragment.glsl");
     GLuint texture1, texture2;
@@ -76,16 +89,16 @@ int main() {
         glBindTexture(GL_TEXTURE_2D, texture1);
         glActiveTexture(GL_TEXTURE1);
         glBindTexture(GL_TEXTURE_2D, texture2);
-        render_scene(shaderProgram, camera, VAO, EBO);
+        render_scene(shaderProgram, &camera, cube.VAO, cube.EBO);
 
 
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
 
-    glDeleteVertexArrays(1, &VAO);
-    glDeleteBuffers(1, &VBO);
-    glDeleteBuffers(1, &EBO);
+    glDeleteVertexArrays(1, &cube.VAO);
+    glDeleteBuffers(1, &cube.VBO);
+    glDeleteBuffers(1, &cube.EBO);
     glDeleteProgram(shaderProgram);
     glfwTerminate();
     return 0;
@@ -163,7 +176,7 @@ bool init_glad() {
     }
     return true;
 }
-GLFWwindow *setup_window_and_camera(int width, int height, const char* title, Camera** out_camera){
+GLFWwindow *setup_window(int width, int height, const char* title, Camera* camera){
   glfwInit();
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
@@ -176,20 +189,14 @@ GLFWwindow *setup_window_and_camera(int width, int height, const char* title, Ca
   }
   glfwMakeContextCurrent(window);
   glfwSwapInterval(1); //Usá V-Sync para que GLFW sincronice el swap de buffers con la frecuencia de actualización del monitor
-  Camera* camera = camera_init(cameraPos, cameraUp, YAW, PITCH);
-    if (!camera) {
-        glfwDestroyWindow(window);
-        return NULL;
-    }
+
   glfwSetWindowUserPointer(window, camera);
   glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
   glfwSetCursorPosCallback(window, mouse_callback);
   glfwSetScrollCallback(window, scroll_callback);
   glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-  *out_camera = camera;
   return window;
 }
-
 
 GLuint init_shader_program(const char *vertexPath, const char *fragmentPath) {
     GLuint vertexShader, fragmentShader;
@@ -197,8 +204,6 @@ GLuint init_shader_program(const char *vertexPath, const char *fragmentPath) {
     compile_shader(&fragmentShader, GL_FRAGMENT_SHADER, fragmentPath);
     return link_shader(vertexShader, fragmentShader);
 }
-
-
 
 void init_texture(GLuint shaderProgram, GLuint *tex, const char *path, const char *uniformName, int textureUnit) {
     load_texture(tex, path);  // Esta debe bindear y configurar GL_TEXTURE_2D, típicamente a GL_TEXTURE0 + textureUnit
