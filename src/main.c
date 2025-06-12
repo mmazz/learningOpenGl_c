@@ -3,6 +3,7 @@
 #include "texture.h"
 #include "camera.h"
 #include "mesh.h"
+#include "physics.h"
 #include <GLFW/glfw3.h>
 #include <cglm/affine.h> // para funciones como glm_rotate, glm_scale
 #include <cglm/cglm.h>
@@ -15,7 +16,8 @@
 
 const unsigned int SCR_WIDTH = 800;
 const unsigned int SCR_HEIGHT = 600;
-
+vec3 boxMax = {5,5,5};
+vec3 boxMin = {-5,-5,-5};
 
 float deltaTime = 0.f;
 float lastFrame = 0.f;
@@ -82,7 +84,15 @@ int main() {
   //  Mesh cube = mesh_generate_cube();
     Mesh sphere = mesh_generate_sphere(20, 20);
     mat4 instanceModels[NUM_INSTANCES];
+    SpherePhysics spheres[NUM_INSTANCES];
 
+
+    for (int i = 0; i < NUM_INSTANCES; i++) {
+        randomPos(spheres[i].position);
+        spheres[i].position[1] += 5.0f;   // por ejemplo para que caigan desde arriba
+        glm_vec3_zero(spheres[i].velocity);
+        spheres[i].radius = 0.1f;
+    }
     for (int i = 0; i < NUM_INSTANCES; i++) {
         glm_mat4_identity(instanceModels[i]);
 
@@ -107,7 +117,24 @@ int main() {
         float currentFrame = glfwGetTime();
         deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;
+        for (int i = 0; i < NUM_INSTANCES; i++) {
+            update_physics(&spheres[i], deltaTime, boxMin, boxMax);
+        }
 
+        // Chequear y resolver colisiones entre esferas
+        resolve_sphere_collisions(spheres, NUM_INSTANCES);
+        resolve_sphere_collisions(spheres, NUM_INSTANCES);
+        resolve_sphere_collisions(spheres, NUM_INSTANCES);
+        resolve_sphere_collisions(spheres, NUM_INSTANCES);
+        resolve_sphere_collisions(spheres, NUM_INSTANCES);
+
+        // Actualizar matrices para instancing según posiciones nuevas
+        for (int i = 0; i < NUM_INSTANCES; i++) {
+            glm_mat4_identity(instanceModels[i]);
+            glm_translate(instanceModels[i], spheres[i].position);
+            glm_scale_uni(instanceModels[i], spheres[i].radius);
+        }
+        init_instance(sphere.VAO, instanceModels);
         processInput(window, deltaTime);
 
         glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
