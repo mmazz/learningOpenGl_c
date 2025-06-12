@@ -12,7 +12,7 @@
 #include <stdlib.h>
 #include <time.h>
 
-#define NUM_INSTANCES 10000
+#define MAX_PARTICLES 10000
 
 const unsigned int SCR_WIDTH = 800;
 const unsigned int SCR_HEIGHT = 600;
@@ -45,6 +45,22 @@ vec3 cubePositions[] = {
     {  1.5f,  0.2f, -1.5f },
     { -1.3f,  1.0f, -1.5f }
 };
+#define HASH_TABLE_SIZE 10007  // número primo para minimizar colisiones
+
+typedef struct {
+    int count;
+    int indices[64];  // máx 64 partículas por celda
+} Cell;
+
+Cell hashTable[HASH_TABLE_SIZE];
+unsigned int spatial_hash(int x, int y, int z, unsigned int table_size) {
+    const unsigned int p1 = 73856093;
+    const unsigned int p2 = 19349663;
+    const unsigned int p3 = 83492791;
+    unsigned int hash = (x * p1) ^ (y * p2) ^ (z * p3);
+    return hash % table_size;
+}
+
 
 
 void processInput(GLFWwindow* window, float deltaTime);
@@ -61,10 +77,11 @@ GLFWwindow *setup_window(int width, int height, const char* title, Camera* camer
 
 void init_instance(unsigned int VAO, mat4* instanceModels);
 void del_buffers(Mesh* mesh);
-void init_instance_buffers(SpherePhysics* spheres, mat4* instanceModels);
+void init_instance_buffers(GLuint* VAO, GLuint* VBO, SpherePhysics* spheres, mat4* instanceModels);
 
 void randomPos(vec3 pos);
 
+void render_scene_bis(GLuint shaderProgram, GLuint* VAO, GLuint* VBO,Camera *camera, SpherePhysics* spheres, int num_to_render, GLuint texture1, GLuint texture2);
 void do_physics(SpherePhysics* spheres, double deltaTime, mat4* instanceModels, int num_spheres);
 
 int main() {
@@ -83,14 +100,14 @@ int main() {
   //  GLuint VAO, VBO, EBO;
   //  Mesh cube = mesh_generate_cube();
     Mesh sphere = mesh_generate_sphere(20, 20);
-    mat4 instanceModels[NUM_INSTANCES];
-    SpherePhysics spheres[NUM_INSTANCES];
+    mat4 instanceModels[MAX_PARTICLES];
+    SpherePhysics spheres[MAX_PARTICLES];
 
-    init_instance_buffers(spheres, instanceModels);
-   // init_buffers(&cube.VAO, &cube.VBO, &cube.EBO, cube.vertices, cube.vertexSize, cube.indices, cube.indexSize);
+    GLuint VAO_points, VBO_points;
+    init_instance_buffers(&VAO_points, &VBO_points, spheres, instanceModels);
     init_buffers(&sphere.VAO, &sphere.VBO, &sphere.EBO, sphere.vertices, sphere.vertexSize, sphere.indices, sphere.indexSize);
     init_instance(sphere.VAO, instanceModels);
-    GLuint shaderProgram = init_shader_program("src/shaders/vertex.glsl", "src/shaders/fragment.glsl");
+    GLuint shaderProgram = init_shader_program("src/shaders/vertex_point.glsl", "src/shaders/fragment.glsl");
     GLuint texture1, texture2;
     init_texture(shaderProgram, &texture1, "assets/wall.jpg", "texture1", 0);
     init_texture(shaderProgram, &texture2, "assets/awesomeface.png", "texture2", 1);
@@ -111,7 +128,8 @@ int main() {
         init_instance(sphere.VAO, instanceModels);
         processInput(window, deltaTime);
 
-        render_scene(shaderProgram, &camera, sphere, num_spheres, texture1, texture2);
+    //    render_scene(shaderProgram, &camera, sphere, num_spheres, texture1, texture2);
+        render_scene_bis(shaderProgram, &VAO_points, &VBO_points, &camera, spheres, num_spheres, texture1, texture2);
 
 
         glfwSwapBuffers(window);
@@ -126,14 +144,22 @@ int main() {
     return 0;
 }
 
-void init_instance_buffers(SpherePhysics* spheres, mat4* instanceModels){
-    for (int i = 0; i < NUM_INSTANCES; i++) {
+void init_instance_buffers(GLuint* VAO, GLuint* VBO, SpherePhysics* spheres, mat4* instanceModels){
+    glGenVertexArrays(1, VAO);
+    glGenBuffers(1, VBO);
+
+    glBindVertexArray(*VAO);
+
+    glBindBuffer(GL_ARRAY_BUFFER, *VBO);
+    vec3 positions[MAX_PARTICLES] ={0};
+    for (int i = 0; i < MAX_PARTICLES; i++) {
         randomPos(spheres[i].position);
+        glm_vec3_copy(spheres[i].position, positions[i]);
         //spheres[i].position[1] += 5.0f;   // por ejemplo para que caigan desde arriba
         glm_vec3_zero(spheres[i].velocity);
         spheres[i].radius = 0.05f;
     }
-    for (int i = 0; i < NUM_INSTANCES; i++) {
+    for (int i = 0; i < MAX_PARTICLES; i++) {
         glm_mat4_identity(instanceModels[i]);
 
         vec3 pos;
@@ -144,6 +170,13 @@ void init_instance_buffers(SpherePhysics* spheres, mat4* instanceModels){
 
         glm_scale_to(translated, (vec3){0.1f, 0.1f, 0.1f}, instanceModels[i]); // resultado final en instanceModels[i]
     }
+
+    glBufferData(GL_ARRAY_BUFFER, MAX_PARTICLES* sizeof(vec3), positions, GL_DYNAMIC_DRAW);
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(vec3), (void*)0);
+    glEnableVertexAttribArray(0);
+
+    glBindVertexArray(0);
 }
 
 void del_buffers(Mesh* mesh){
@@ -224,7 +257,7 @@ void init_instance(unsigned int VAO, mat4* instanceModels) {
     glBindVertexArray(VAO); // Necesario: configura atributos para este VAO
 
     glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
-    glBufferData(GL_ARRAY_BUFFER, NUM_INSTANCES * sizeof(mat4), instanceModels, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, MAX_PARTICLES * sizeof(mat4), instanceModels, GL_STATIC_DRAW);
 
     // Un mat4 son 4 vec4 → 4 atributos consecutivos
     for (int i = 0; i < 4; i++) {
@@ -282,6 +315,40 @@ void init_texture(GLuint shaderProgram, GLuint *tex, const char *path, const cha
         glUniform1i(location, textureUnit);
     }
 }
+
+void render_scene_bis(GLuint shaderProgram, GLuint* VAO, GLuint* VBO,Camera *camera, SpherePhysics* spheres, int num_to_render, GLuint texture1, GLuint texture2){
+    glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, texture1);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, texture2);
+
+    glUseProgram(shaderProgram);
+
+    // Proyección y vista
+    mat4 projection;
+    glm_perspective(glm_rad(camera->Zoom), (float)SCR_WIDTH / SCR_HEIGHT, 0.1f, 100.0f, projection);
+    glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "projection"), 1, GL_FALSE, (float *)projection);
+
+    mat4 view;
+    camera_get_view_matrix(camera, view);
+    glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "view"), 1, GL_FALSE, (float *)view);
+
+    glBindBuffer(GL_ARRAY_BUFFER, *VBO);
+    vec3* positions_contiguous = malloc(MAX_PARTICLES * sizeof(vec3));
+    for (int i = 0; i < MAX_PARTICLES; i++) {
+        glm_vec3_copy(spheres[i].position, positions_contiguous[i]);
+    }
+    glBufferSubData(GL_ARRAY_BUFFER, 0, MAX_PARTICLES * sizeof(vec3), positions_contiguous);
+
+    // Dibujar
+    glBindVertexArray(*VAO);
+    glDrawArrays(GL_POINTS, 0, MAX_PARTICLES);
+    glBindVertexArray(0);
+
+}
+
 
 void render_scene(GLuint shaderProgram, Camera *camera, Mesh mesh, int num_to_render, GLuint texture1, GLuint texture2){
     glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
