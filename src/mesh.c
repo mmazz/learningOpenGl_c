@@ -58,6 +58,7 @@ static const unsigned int indexes[6*6] = {
     // Cara superior
     20,21,22, 22,23,20
 };
+
 Mesh mesh_generate_cube(void) {
     Mesh m = {0};
 

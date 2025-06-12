@@ -8,10 +8,13 @@
 #include <cglm/cglm.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+#define NUM_INSTANCES 100
 
 const unsigned int SCR_WIDTH = 800;
 const unsigned int SCR_HEIGHT = 600;
-
 
 
 float deltaTime = 0.f;
@@ -54,8 +57,16 @@ void render_scene(GLuint shaderProgram, Camera *camera, Mesh mesh);
 GLuint init_shader_program(const char *vertexPath, const char *fragmentPath);
 GLFWwindow *setup_window(int width, int height, const char* title, Camera* camera);
 
+void init_instance(unsigned int VAO, mat4* instanceModels);
 void del_buffers(Mesh* mesh);
+
+void randomPos(vec3 pos) {
+    pos[0] = ((float)rand() / RAND_MAX) * 2.0f - 1.0f;
+    pos[1] = ((float)rand() / RAND_MAX) * 2.0f - 1.0f;
+    pos[2] = ((float)rand() / RAND_MAX) * 2.0f - 1.0f;
+}
 int main() {
+    srand(time(NULL));
     Camera camera = camera_init(cameraPos, cameraUp, YAW, PITCH);
     GLFWwindow* window = setup_window(SCR_WIDTH, SCR_HEIGHT, "Simulator", &camera);
     if (!window) {
@@ -70,10 +81,23 @@ int main() {
   //  GLuint VAO, VBO, EBO;
   //  Mesh cube = mesh_generate_cube();
     Mesh sphere = mesh_generate_sphere(20, 20);
+    mat4 instanceModels[NUM_INSTANCES];
+
+    for (int i = 0; i < NUM_INSTANCES; i++) {
+        glm_mat4_identity(instanceModels[i]);
+
+        vec3 pos;
+        randomPos(pos);
+
+        mat4 translated;
+        glm_translate_to(instanceModels[i], pos, translated); // resultado en translated
+
+        glm_scale_to(translated, (vec3){0.1f, 0.1f, 0.1f}, instanceModels[i]); // resultado final en instanceModels[i]
+    }
 
    // init_buffers(&cube.VAO, &cube.VBO, &cube.EBO, cube.vertices, cube.vertexSize, cube.indices, cube.indexSize);
     init_buffers(&sphere.VAO, &sphere.VBO, &sphere.EBO, sphere.vertices, sphere.vertexSize, sphere.indices, sphere.indexSize);
-
+    init_instance(sphere.VAO, instanceModels);
     GLuint shaderProgram = init_shader_program("src/shaders/vertex.glsl", "src/shaders/fragment.glsl");
     GLuint texture1, texture2;
     init_texture(shaderProgram, &texture1, "assets/wall.jpg", "texture1", 0);
@@ -177,8 +201,27 @@ void init_buffers(unsigned int *VAO, unsigned int *VBO, unsigned int *EBO, float
     glEnableVertexAttribArray(1);
 
     glBindVertexArray(0);
+
 }
 
+void init_instance(unsigned int VAO, mat4* instanceModels) {
+    GLuint instanceVBO;
+    glGenBuffers(1, &instanceVBO);
+
+    glBindVertexArray(VAO); // Necesario: configura atributos para este VAO
+
+    glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
+    glBufferData(GL_ARRAY_BUFFER, NUM_INSTANCES * sizeof(mat4), instanceModels, GL_STATIC_DRAW);
+
+    // Un mat4 son 4 vec4 → 4 atributos consecutivos
+    for (int i = 0; i < 4; i++) {
+        glVertexAttribPointer(2 + i, 4, GL_FLOAT, GL_FALSE, sizeof(mat4), (void *)(sizeof(vec4) * i));
+        glEnableVertexAttribArray(2 + i);
+        glVertexAttribDivisor(2 + i, 1); // Este atributo cambia por instancia
+    }
+
+    glBindVertexArray(0); // Opcional pero ordenado
+}
 bool init_glad() {
     if (!gladLoadGL((GLADloadfunc)glfwGetProcAddress)) {
         fprintf(stderr, "Failed to initialize GLAD\n");
@@ -244,16 +287,17 @@ void render_scene(GLuint shaderProgram, Camera *camera, Mesh mesh) {
 
     // Modelado y dibujado
     glBindVertexArray(mesh.VAO);
-    for (unsigned int i = 0; i < 10; i++) {
-        mat4 model;
-        glm_mat4_identity(model);
-        glm_translate(model, cubePositions[i]);
-
-        float angle = 20.0f * i;
-        glm_rotate(model, glfwGetTime() * glm_rad(angle), (vec3){1.0f, 0.3f, 0.5f});
-        glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "model"), 1, GL_FALSE, (float *)model);
-
-        glDrawElements(GL_TRIANGLES, mesh.indexCount, GL_UNSIGNED_INT, 0);
-    }
+//    for (unsigned int i = 0; i < 10; i++) {
+//        mat4 model;
+//        glm_mat4_identity(model);
+//        glm_translate(model, cubePositions[i]);
+//
+//        float angle = 20.0f * i;
+//        glm_rotate(model, glfwGetTime() * glm_rad(angle), (vec3){1.0f, 0.3f, 0.5f});
+//        glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "model"), 1, GL_FALSE, (float *)model);
+//
+//        glDrawElements(GL_TRIANGLES, mesh.indexCount, GL_UNSIGNED_INT, 0);
+//    }
+    glDrawElementsInstanced(GL_TRIANGLES, mesh.indexCount, GL_UNSIGNED_INT, 0, NUM_INSTANCES);
     glBindVertexArray(0);
 }
