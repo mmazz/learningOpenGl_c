@@ -12,12 +12,12 @@
 #include <stdlib.h>
 #include <time.h>
 
-#define NUM_INSTANCES 100
+#define NUM_INSTANCES 10000
 
 const unsigned int SCR_WIDTH = 800;
 const unsigned int SCR_HEIGHT = 600;
-vec3 boxMax = {5,5,5};
-vec3 boxMin = {-5,-5,-5};
+vec3 boxMax = {2,2,2};
+vec3 boxMin = {-2,-2,-2};
 
 float deltaTime = 0.f;
 float lastFrame = 0.f;
@@ -55,18 +55,18 @@ bool init_glad();
 void init_buffers(unsigned int *VAO, unsigned int *VBO, unsigned int *EBO, float *vertices, size_t vertices_size, unsigned int *indices, size_t indices_size);
 void init_texture(GLuint shaderProgram, GLuint *tex, const char *path, const char *uniformName, int textureUnit);
 
-void render_scene(GLuint shaderProgram, Camera *camera, Mesh mesh);
+void render_scene(GLuint shaderProgram, Camera *camera, Mesh mesh, int num_to_render, GLuint texture1, GLuint texture2);
 GLuint init_shader_program(const char *vertexPath, const char *fragmentPath);
 GLFWwindow *setup_window(int width, int height, const char* title, Camera* camera);
 
 void init_instance(unsigned int VAO, mat4* instanceModels);
 void del_buffers(Mesh* mesh);
+void init_instance_buffers(SpherePhysics* spheres, mat4* instanceModels);
 
-void randomPos(vec3 pos) {
-    pos[0] = ((float)rand() / RAND_MAX) * 2.0f - 1.0f;
-    pos[1] = ((float)rand() / RAND_MAX) * 2.0f - 1.0f;
-    pos[2] = ((float)rand() / RAND_MAX) * 2.0f - 1.0f;
-}
+void randomPos(vec3 pos);
+
+void do_physics(SpherePhysics* spheres, double deltaTime, mat4* instanceModels, int num_spheres);
+
 int main() {
     srand(time(NULL));
     Camera camera = camera_init(cameraPos, cameraUp, YAW, PITCH);
@@ -86,25 +86,7 @@ int main() {
     mat4 instanceModels[NUM_INSTANCES];
     SpherePhysics spheres[NUM_INSTANCES];
 
-
-    for (int i = 0; i < NUM_INSTANCES; i++) {
-        randomPos(spheres[i].position);
-        spheres[i].position[1] += 5.0f;   // por ejemplo para que caigan desde arriba
-        glm_vec3_zero(spheres[i].velocity);
-        spheres[i].radius = 0.1f;
-    }
-    for (int i = 0; i < NUM_INSTANCES; i++) {
-        glm_mat4_identity(instanceModels[i]);
-
-        vec3 pos;
-        randomPos(pos);
-
-        mat4 translated;
-        glm_translate_to(instanceModels[i], pos, translated); // resultado en translated
-
-        glm_scale_to(translated, (vec3){0.1f, 0.1f, 0.1f}, instanceModels[i]); // resultado final en instanceModels[i]
-    }
-
+    init_instance_buffers(spheres, instanceModels);
    // init_buffers(&cube.VAO, &cube.VBO, &cube.EBO, cube.vertices, cube.vertexSize, cube.indices, cube.indexSize);
     init_buffers(&sphere.VAO, &sphere.VBO, &sphere.EBO, sphere.vertices, sphere.vertexSize, sphere.indices, sphere.indexSize);
     init_instance(sphere.VAO, instanceModels);
@@ -113,39 +95,23 @@ int main() {
     init_texture(shaderProgram, &texture1, "assets/wall.jpg", "texture1", 0);
     init_texture(shaderProgram, &texture2, "assets/awesomeface.png", "texture2", 1);
 
+    double step = 0;
+    int num_spheres = 15;
     while (!glfwWindowShouldClose(window)) {
         float currentFrame = glfwGetTime();
         deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;
-        for (int i = 0; i < NUM_INSTANCES; i++) {
-            update_physics(&spheres[i], deltaTime, boxMin, boxMax);
+        step+=deltaTime;
+        if(step>0.5){
+            step=0;
+            num_spheres+=5;
         }
+        do_physics(spheres, deltaTime, instanceModels, num_spheres);
 
-        // Chequear y resolver colisiones entre esferas
-        resolve_sphere_collisions(spheres, NUM_INSTANCES);
-        resolve_sphere_collisions(spheres, NUM_INSTANCES);
-        resolve_sphere_collisions(spheres, NUM_INSTANCES);
-        resolve_sphere_collisions(spheres, NUM_INSTANCES);
-        resolve_sphere_collisions(spheres, NUM_INSTANCES);
-
-        // Actualizar matrices para instancing según posiciones nuevas
-        for (int i = 0; i < NUM_INSTANCES; i++) {
-            glm_mat4_identity(instanceModels[i]);
-            glm_translate(instanceModels[i], spheres[i].position);
-            glm_scale_uni(instanceModels[i], spheres[i].radius);
-        }
         init_instance(sphere.VAO, instanceModels);
         processInput(window, deltaTime);
 
-        glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, texture1);
-        glActiveTexture(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_2D, texture2);
-     //   render_scene(shaderProgram, &camera, cube.VAO, cube.EBO);
-        render_scene(shaderProgram, &camera, sphere);
+        render_scene(shaderProgram, &camera, sphere, num_spheres, texture1, texture2);
 
 
         glfwSwapBuffers(window);
@@ -158,6 +124,26 @@ int main() {
     glDeleteProgram(shaderProgram);
     glfwTerminate();
     return 0;
+}
+
+void init_instance_buffers(SpherePhysics* spheres, mat4* instanceModels){
+    for (int i = 0; i < NUM_INSTANCES; i++) {
+        randomPos(spheres[i].position);
+        //spheres[i].position[1] += 5.0f;   // por ejemplo para que caigan desde arriba
+        glm_vec3_zero(spheres[i].velocity);
+        spheres[i].radius = 0.05f;
+    }
+    for (int i = 0; i < NUM_INSTANCES; i++) {
+        glm_mat4_identity(instanceModels[i]);
+
+        vec3 pos;
+        randomPos(pos);
+
+        mat4 translated;
+        glm_translate_to(instanceModels[i], pos, translated); // resultado en translated
+
+        glm_scale_to(translated, (vec3){0.1f, 0.1f, 0.1f}, instanceModels[i]); // resultado final en instanceModels[i]
+    }
 }
 
 void del_buffers(Mesh* mesh){
@@ -297,9 +283,13 @@ void init_texture(GLuint shaderProgram, GLuint *tex, const char *path, const cha
     }
 }
 
-void render_scene(GLuint shaderProgram, Camera *camera, Mesh mesh) {
+void render_scene(GLuint shaderProgram, Camera *camera, Mesh mesh, int num_to_render, GLuint texture1, GLuint texture2){
     glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, texture1);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, texture2);
 
     glUseProgram(shaderProgram);
 
@@ -325,6 +315,27 @@ void render_scene(GLuint shaderProgram, Camera *camera, Mesh mesh) {
 //
 //        glDrawElements(GL_TRIANGLES, mesh.indexCount, GL_UNSIGNED_INT, 0);
 //    }
-    glDrawElementsInstanced(GL_TRIANGLES, mesh.indexCount, GL_UNSIGNED_INT, 0, NUM_INSTANCES);
+    glDrawElementsInstanced(GL_TRIANGLES, mesh.indexCount, GL_UNSIGNED_INT, 0, num_to_render);
     glBindVertexArray(0);
+}
+
+void randomPos(vec3 pos) {
+    pos[0] = ((float)rand() / RAND_MAX) * 2.0f - 1.0f;
+    pos[1] = ((float)rand() / RAND_MAX) * 2.0f - 1.0f;
+    pos[2] = ((float)rand() / RAND_MAX) * 2.0f - 1.0f;
+}
+void do_physics(SpherePhysics* spheres, double deltaTime, mat4* instanceModels, int num_spheres){
+    for (int i = 0; i < num_spheres; i++) {
+        update_physics(&spheres[i], deltaTime, boxMin, boxMax);
+    }
+
+    // Chequear y resolver colisiones entre esferas
+    resolve_sphere_collisions(spheres, num_spheres);
+
+    // Actualizar matrices para instancing según posiciones nuevas
+    for (int i = 0; i < num_spheres; i++) {
+        glm_mat4_identity(instanceModels[i]);
+        glm_translate(instanceModels[i], spheres[i].position);
+        glm_scale_uni(instanceModels[i], spheres[i].radius);
+    }
 }

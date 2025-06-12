@@ -23,7 +23,7 @@ void update_physics(SpherePhysics* s, float dt, vec3 boxMin, vec3 boxMax) {
 }
 
 void resolve_sphere_collisions(SpherePhysics* spheres, int count) {
-    float padding =.1f;
+    float padding =.001f;
     for (int i = 0; i < count; i++) {
         for (int j = i + 1; j < count; j++) {
             vec3 diff;
