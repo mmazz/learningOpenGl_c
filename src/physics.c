@@ -28,7 +28,7 @@ static inline void get_cell_coords(const vec3 pos, float cellSize, int *ix, int 
     *iz = (int)floorf(pos[2] / cellSize);
 }
 
-void update_physics(SpherePhysics* s, float dt, vec3 boxMin, vec3 boxMax) {
+void update_physics(Particles* s, float dt, const vec3 boxMin, const vec3 boxMax) {
     // Gravedad
     s->velocity[1] -= 9.81f * dt;
 
@@ -49,7 +49,7 @@ void update_physics(SpherePhysics* s, float dt, vec3 boxMin, vec3 boxMax) {
         }
     }
 }
-void resolve_sphere_collisions(SpherePhysics* spheres, int count) {
+void resolve_sphere_collisions(Particles* spheres, int count) {
     // Parámetro: tamaño de celda = doble del radio máximo
     float maxRadius = 0.0f;
     for (int i = 0; i < count; i++)

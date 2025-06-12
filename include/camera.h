@@ -18,6 +18,10 @@ typedef enum {
 #define SPEED        2.5f
 #define SENSITIVITY  0.1f
 #define ZOOM         45.0f
+static vec3 cameraPos   = {0.0f, 0.0f, 3.0f};
+static vec3 cameraFront = {0.0f, 0.0f, -1.0f};
+static vec3 cameraUp    = {0.0f, 1.0f,  0.0f};
+
 
 typedef struct {
     vec3 Position;

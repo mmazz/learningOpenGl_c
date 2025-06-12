@@ -10,8 +10,8 @@ typedef struct {
     vec3 position;  // posición actual
     vec3 velocity;  // velocidad actual
     float radius;   // radio de la esfera
-} SpherePhysics;
+} Particles;
 
-void update_physics(SpherePhysics* s, float dt, vec3 boxMin, vec3 boxMax);
-void resolve_sphere_collisions(SpherePhysics* spheres, int count);
+void update_physics(Particles* s, float dt, const vec3 boxMin, const vec3 boxMax);
+void resolve_sphere_collisions(Particles* spheres, int count);
 #endif
