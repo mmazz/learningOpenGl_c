@@ -1,4 +1,32 @@
 #include "physics.h"
+#include <string.h>
+#include <math.h>
+#include <cglm/cglm.h>
+
+#define HASH_TABLE_SIZE 2097152     // primo cercano a 2ⁿ para buen hashing
+#define MAX_BUCKET_SIZE 32          // max partículas por celda
+
+// Tabla de hash: por simplicidad, un arreglo fijo de buckets
+static int hashCount[HASH_TABLE_SIZE];
+static int hashTable[HASH_TABLE_SIZE][MAX_BUCKET_SIZE];
+
+// Constantes de hashing
+static const unsigned int p1 = 73856093u;
+static const unsigned int p2 = 19349663u;
+static const unsigned int p3 = 83492791u;
+
+// Función de hash espacial
+static inline unsigned int spatial_hash(int x, int y, int z) {
+    unsigned int h = (unsigned int)(x * p1 ^ y * p2 ^ z * p3);
+    return h & (HASH_TABLE_SIZE - 1);  // asume HASH_TABLE_SIZE potencia de 2
+}
+
+// Calcula coords de celda
+static inline void get_cell_coords(const vec3 pos, float cellSize, int *ix, int *iy, int *iz) {
+    *ix = (int)floorf(pos[0] / cellSize);
+    *iy = (int)floorf(pos[1] / cellSize);
+    *iz = (int)floorf(pos[2] / cellSize);
+}
 
 void update_physics(SpherePhysics* s, float dt, vec3 boxMin, vec3 boxMax) {
     // Gravedad
@@ -21,51 +49,79 @@ void update_physics(SpherePhysics* s, float dt, vec3 boxMin, vec3 boxMax) {
         }
     }
 }
-
 void resolve_sphere_collisions(SpherePhysics* spheres, int count) {
-    float padding =.001f;
+    // Parámetro: tamaño de celda = doble del radio máximo
+    float maxRadius = 0.0f;
+    for (int i = 0; i < count; i++)
+        if (spheres[i].radius > maxRadius) maxRadius = spheres[i].radius;
+    float cellSize = maxRadius * 2.0f;
+
+    // 1) Limpiar hash
+    memset(hashCount, 0, sizeof(hashCount));
+
+    // 2) Insertar cada partícula en su celda
     for (int i = 0; i < count; i++) {
-        for (int j = i + 1; j < count; j++) {
-            vec3 diff;
-            glm_vec3_sub(spheres[j].position, spheres[i].position, diff);
-            float dist = glm_vec3_norm(diff);
-            float minDist = spheres[i].radius + spheres[j].radius;
+        int cx, cy, cz;
+        get_cell_coords(spheres[i].position, cellSize, &cx, &cy, &cz);
+        unsigned int h = spatial_hash(cx, cy, cz);
+        if (hashCount[h] < MAX_BUCKET_SIZE)
+            hashTable[h][hashCount[h]++] = i;
+    }
 
-            if (dist < minDist && dist > 0.0f) {
-                // Separar las esferas para que no se superpongan
-                float overlap = minDist - dist + padding;
-                vec3 correction;
-                glm_vec3_scale(diff, overlap / dist / 2.0f, correction);
+    // 3) Varias iteraciones de corrección (evita que queden atrapadas)
+    const int iterations = 4;
+    const float restitution = 0.8f;  // coeficiente de restitución
+    const float padding = 1e-3f;
 
-                // Mover cada esfera la mitad de la corrección
-                glm_vec3_sub(spheres[i].position, correction, spheres[i].position);
-                glm_vec3_add(spheres[j].position, correction, spheres[j].position);
+    for (int it = 0; it < iterations; it++) {
+        // Para cada partícula
+        for (int i = 0; i < count; i++) {
+            // Localizar su celda base
+            int cx, cy, cz;
+            get_cell_coords(spheres[i].position, cellSize, &cx, &cy, &cz);
 
-                // Ajustar velocidades (simple rebote elástico)
-                vec3 relativeVel;
-                glm_vec3_sub(spheres[j].velocity, spheres[i].velocity, relativeVel);
+            // Chequear vecinos en las 27 celdas alrededor
+            for (int dx = -1; dx <= 1; dx++) {
+            for (int dy = -1; dy <= 1; dy++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                unsigned int h = spatial_hash(cx+dx, cy+dy, cz+dz);
+                int bucketSize = hashCount[h];
+                for (int bi = 0; bi < bucketSize; bi++) {
+                    int j = hashTable[h][bi];
+                    if (j <= i) continue;  // evita duplicados y self
 
-                float dot = glm_vec3_dot(relativeVel, diff) / (dist * dist);
+                    vec3 diff;
+                    glm_vec3_sub(spheres[j].position, spheres[i].position, diff);
+                    float dist = glm_vec3_norm(diff);
+                    float minDist = spheres[i].radius + spheres[j].radius;
+                    if (dist <= 0.0f || dist >= minDist + padding) continue;
 
-                if (dot > 0) {  // Solo si se acercan
+                    // 3a) Separación de posiciones
+                    float overlap = (minDist + padding - dist);
                     vec3 normal;
-                    glm_vec3_normalize_to(diff, normal);
-                    float v1n = glm_vec3_dot(spheres[i].velocity, normal);
-                    float v2n = glm_vec3_dot(spheres[j].velocity, normal);
+                    glm_vec3_divs(diff, dist, normal);  // normaliza diff
+                    vec3 correction;
+                    glm_vec3_scale(normal, overlap * 0.5f, correction);
+                    // desplaza i y j en direcciones opuestas
+                    glm_vec3_sub(spheres[i].position, correction, spheres[i].position);
+                    glm_vec3_add(spheres[j].position, correction, spheres[j].position);
 
-                    float m1 = 1.0f; // asumamos masa 1 para ambas
-                    float m2 = 1.0f;
+                    // 3b) Impulso de colisión elástica
+                    // calcula componente normal de la velocidad relativa
+                    vec3 relVel;
+                    glm_vec3_sub(spheres[j].velocity, spheres[i].velocity, relVel);
+                    float vRel = glm_vec3_dot(relVel, normal);
+                    if (vRel > 0.0f) continue;  // se alejan, no aplica impulso
 
-                    float optimizedP = (2.0f * (v1n - v2n)) / (m1 + m2);
-
-                    vec3 v1Change, v2Change;
-                    glm_vec3_scale(normal, optimizedP * m2, v1Change);
-                    glm_vec3_scale(normal, optimizedP * m1, v2Change);
-
-                    glm_vec3_sub(spheres[i].velocity, v1Change, spheres[i].velocity);
-                    glm_vec3_add(spheres[j].velocity, v2Change, spheres[j].velocity);
+                    // masa = 1 para ambas → impulso simple
+                    float jImpulse = -(1.0f + restitution) * vRel * 0.5f;
+                    vec3 impulse;
+                    glm_vec3_scale(normal, jImpulse, impulse);
+                    glm_vec3_sub(spheres[i].velocity, impulse, spheres[i].velocity);
+                    glm_vec3_add(spheres[j].velocity, impulse, spheres[j].velocity);
                 }
-            }
+            } } }
         }
     }
 }
+
