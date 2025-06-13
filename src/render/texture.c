@@ -1,6 +1,6 @@
-#include "texture.h"
+#include "render/texture.h"
 #define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
+#include "core/stb_image.h"
 
 void load_texture(unsigned int* texture, const char* path)
 {

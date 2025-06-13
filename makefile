@@ -1,15 +1,26 @@
 CC = gcc
 CFLAGS = -std=c99 -Wall -Wextra -O2 -Iinclude
-SRC = src/main.c src/gl.c src/shader.c src/texture.c src/camera.c src/mesh.c src/physics.c
-OBJ := $(patsubst src/%.c, build/obj/%.o, $(SRC))
 LIBS = -lglfw -ldl -lGL -lm
-TARGET = main
-EXECUTABLE = simulator
+
+# Archivos fuente organizados por módulo
+SRC = \
+	src/main.c \
+	src/core/gl.c \
+	src/render/shader.c \
+	src/render/mesh.c \
+	src/render/camera.c \
+	src/render/texture.c \
+	src/physics/physics.c
+
+# Reglas para convertir src/... en build/obj/...
+OBJ = $(patsubst src/%.c, build/obj/%.o, $(SRC))
+
+TARGET = simulator
 DIRS = build build/obj
 
-.PHONY: clean
+.PHONY: all clean directories
 
-all: directories $(TARGET)
+all: directories build/$(TARGET)
 
 directories:
 	@for dir in $(DIRS); do \
@@ -19,14 +30,15 @@ directories:
 		fi; \
 	done
 
-$(TARGET): $(OBJ)
-	$(CC) $(CFLAGS) -o build/$(EXECUTABLE) $(OBJ) $(LIBS)
+# Regla principal de linkeo
+build/$(TARGET): $(OBJ)
+	$(CC) $(CFLAGS) -o $@ $^ $(LIBS)
 
-
+# Compilación de cada .c en su .o
 build/obj/%.o: src/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-
 clean:
-	rm -f $(OBJ) build/$(EXECUTABLE)
+	rm -rf build/obj/*.o build/$(TARGET)
+

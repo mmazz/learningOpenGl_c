@@ -1,4 +1,4 @@
-#include "camera.h"
+#include "render/camera.h"
 #include <cglm/vec3.h>
 #include <cglm/mat4.h>
 #include <cglm/cam.h>

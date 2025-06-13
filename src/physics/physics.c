@@ -1,4 +1,4 @@
-#include "physics.h"
+#include "physics/physics.h"
 #include <string.h>
 #include <math.h>
 #include <cglm/cglm.h>

@@ -1,8 +1,8 @@
 #include "glad/gl.h"
-#include "shader.h"
-#include "texture.h"
-#include "camera.h"
-#include "physics.h"
+#include "render/shader.h"
+#include "render/texture.h"
+#include "render/camera.h"
+#include "physics/physics.h"
 #include <GLFW/glfw3.h>
 #include <cglm/affine.h> // para funciones como glm_rotate, glm_scale
 #include <cglm/cglm.h>
@@ -212,8 +212,8 @@ int main() {
     set_up_callbacks(window, &camera);
     init_particles_and_buffers(&vao, &vbo_pos, &vbo_rad);
 
-    GLuint shaderProgram = init_shader_program("src/shaders/vertex_point.glsl", "src/shaders/fragment_point.glsl");
-    GLuint shaderProgramEnviroment = init_shader_program("src/shaders/vertex_enviroment.glsl", "src/shaders/fragment_enviroment.glsl");
+    GLuint shaderProgram = init_shader_program("shaders/vertex_point.glsl", "shaders/fragment_point.glsl");
+    GLuint shaderProgramEnviroment = init_shader_program("shaders/vertex_enviroment.glsl", "shaders/fragment_enviroment.glsl");
 
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_PROGRAM_POINT_SIZE);
