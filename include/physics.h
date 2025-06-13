@@ -7,8 +7,9 @@
 #include <glad/gl.h>
 
 typedef struct {
-    vec3 position;  // posición actual
-    vec3 velocity;  // velocidad actual
+    vec3 current;  // posición actual
+    vec3 previus;  //
+    vec3 acceleration;
     float radius;   // radio de la esfera
 } Particles;
 

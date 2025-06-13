@@ -33,43 +33,53 @@ void collision_box(Particles* p, const vec3 boxMin, const vec3 boxMax) {
         float min = boxMin[i] + p->radius;
         float max = boxMax[i] - p->radius;
 
-        if (p->position[i] < min) {
-            p->position[i] = min;
-            p->velocity[i] *= -0.8f; // rebote simple
-        } else if (p->position[i] > max) {
-            p->position[i] = max;
-            p->velocity[i] *= -0.8f;
+        if (p->current[i] < min) {
+            p->current[i] = min;
+            p->previus[i] *= -0.8f; // rebote simple
+        } else if (p->current[i] > max) {
+            p->current[i] = max;
+            p->previus[i] *= -0.8f;
         }
     }
 }
 
 void collision_sphere(Particles* p, float radius) {
     // Colisión con esfera de radio fijo centrada en el origen
-    float dist = glm_vec3_norm(p->position);
+    float dist = glm_vec3_norm(p->current);
     float max_dist = radius - p->radius;
 
     if (dist > max_dist) {
         // Reubicar en la superficie
         vec3 normal;
-        glm_vec3_normalize_to(p->position, normal);  // dirección desde el centro
+        glm_vec3_normalize_to(p->current, normal);  // dirección desde el centro
 
-        glm_vec3_scale(normal, max_dist, p->position);
+        glm_vec3_scale(normal, max_dist, p->current);
 
         // Reflejar velocidad (rebote simple)
-        float v_dot_n = glm_vec3_dot(p->velocity, normal);
+        float v_dot_n = glm_vec3_dot(p->previus, normal);
         vec3 v_reflected;
         glm_vec3_scale(normal, 2.0f * v_dot_n, v_reflected);
-        glm_vec3_sub(p->velocity, v_reflected, p->velocity);
-        glm_vec3_scale(p->velocity, 0.8f, p->velocity); // pérdida de energía
+        glm_vec3_sub(p->previus, v_reflected, p->previus);
+        glm_vec3_scale(p->previus, 0.8f, p->previus); // pérdida de energía
     }
 }
 
 void update_physics(Particles* p, float radius, float dt, const vec3 boxMin, const vec3 boxMax, bool isABox) {
-    // Gravedad
-    p->velocity[1] -= 9.81f * dt;
+    float dt2 = dt*dt;
+    vec3 res;
 
-    // Movimiento
-    glm_vec3_muladds(p->velocity, dt, p->position);
+    // res = 2 * current - previous + acceleration * dt^2
+    glm_vec3_scale(p->current, 2.0f, res);
+    glm_vec3_sub(res, p->previus, res);
+
+    vec3 accTerm;
+    glm_vec3_scale(p->acceleration, dt2, accTerm);
+    glm_vec3_scale(accTerm, 0.5, accTerm);
+    glm_vec3_add(res, accTerm, res);
+
+    // Update
+    glm_vec3_copy(p->current, p->previus);
+    glm_vec3_copy(res, p->current);
 
     if(isABox)
         collision_box(p, boxMin, boxMax);
@@ -90,7 +100,7 @@ void resolve_sphere_collisions(Particles* spheres, int count) {
     // 2) Insertar cada partícula en su celda
     for (int i = 0; i < count; i++) {
         int cx, cy, cz;
-        get_cell_coords(spheres[i].position, cellSize, &cx, &cy, &cz);
+        get_cell_coords(spheres[i].current, cellSize, &cx, &cy, &cz);
         unsigned int h = spatial_hash(cx, cy, cz);
         if (hashCount[h] < MAX_BUCKET_SIZE)
             hashTable[h][hashCount[h]++] = i;
@@ -106,7 +116,7 @@ void resolve_sphere_collisions(Particles* spheres, int count) {
         for (int i = 0; i < count; i++) {
             // Localizar su celda base
             int cx, cy, cz;
-            get_cell_coords(spheres[i].position, cellSize, &cx, &cy, &cz);
+            get_cell_coords(spheres[i].current, cellSize, &cx, &cy, &cz);
 
             // Chequear vecinos en las 27 celdas alrededor
             for (int dx = -1; dx <= 1; dx++) {
@@ -119,7 +129,7 @@ void resolve_sphere_collisions(Particles* spheres, int count) {
                     if (j <= i) continue;  // evita duplicados y self
 
                     vec3 diff;
-                    glm_vec3_sub(spheres[j].position, spheres[i].position, diff);
+                    glm_vec3_sub(spheres[j].current, spheres[i].current, diff);
                     float dist = glm_vec3_norm(diff);
                     float minDist = spheres[i].radius + spheres[j].radius;
                     if (dist <= 0.0f || dist >= minDist + padding) continue;
@@ -131,13 +141,13 @@ void resolve_sphere_collisions(Particles* spheres, int count) {
                     vec3 correction;
                     glm_vec3_scale(normal, overlap * 0.5f, correction);
                     // desplaza i y j en direcciones opuestas
-                    glm_vec3_sub(spheres[i].position, correction, spheres[i].position);
-                    glm_vec3_add(spheres[j].position, correction, spheres[j].position);
+                    glm_vec3_sub(spheres[i].current, correction, spheres[i].current);
+                    glm_vec3_add(spheres[j].current, correction, spheres[j].current);
 
                     // 3b) Impulso de colisión elástica
                     // calcula componente normal de la velocidad relativa
                     vec3 relVel;
-                    glm_vec3_sub(spheres[j].velocity, spheres[i].velocity, relVel);
+                    glm_vec3_sub(spheres[j].previus, spheres[i].previus, relVel);
                     float vRel = glm_vec3_dot(relVel, normal);
                     if (vRel > 0.0f) continue;  // se alejan, no aplica impulso
 
@@ -145,8 +155,8 @@ void resolve_sphere_collisions(Particles* spheres, int count) {
                     float jImpulse = -(1.0f + restitution) * vRel * 0.5f;
                     vec3 impulse;
                     glm_vec3_scale(normal, jImpulse, impulse);
-                    glm_vec3_sub(spheres[i].velocity, impulse, spheres[i].velocity);
-                    glm_vec3_add(spheres[j].velocity, impulse, spheres[j].velocity);
+                    glm_vec3_sub(spheres[i].previus, impulse, spheres[i].previus);
+                    glm_vec3_add(spheres[j].previus, impulse, spheres[j].previus);
                 }
             } } }
         }

@@ -11,7 +11,7 @@
 #include <stdlib.h>
 #include <time.h>
 
-#define MAX_PARTICLES    100000
+#define MAX_PARTICLES    100
 #define STEP_RAIN        1000
 #define SCR_WIDTH        800
 #define SCR_HEIGHT       600
@@ -190,7 +190,11 @@ GLuint init_shader_program(const char *vertexPath, const char *fragmentPath);
 void set_up_callbacks(GLFWwindow* window, Camera* camera);
 GLFWwindow* setup_window(int width, int height, const char* title);
 
-
+void init_particles(Particles* p){
+    for (int i = 0; i < MAX_PARTICLES; i++) {
+        glm_vec3_copy( (vec3){0.0, -9.8, 0.0}, p[i].acceleration);
+    }
+}
 int main() {
     GLFWwindow* window = setup_window(SCR_WIDTH, SCR_HEIGHT, "Simulator");
     if (!window) {
@@ -201,6 +205,9 @@ int main() {
         printf("Error at glad init");
         return -1;
     }
+    printf("Renderer: %s\n", glGetString(GL_RENDERER));
+    printf("Vendor:   %s\n", glGetString(GL_VENDOR));
+    printf("Version:  %s\n", glGetString(GL_VERSION));
     Camera camera = camera_init(cameraPos, cameraUp, YAW, PITCH);
     set_up_callbacks(window, &camera);
     init_particles_and_buffers(&vao, &vbo_pos, &vbo_rad);
@@ -212,6 +219,8 @@ int main() {
     glEnable(GL_PROGRAM_POINT_SIZE);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    init_particles(particles);
     if(isABox)
         init_box_enviroment(BOX_MIN, BOX_MAX);
     else
@@ -250,8 +259,8 @@ int main() {
 void init_particles_and_buffers(GLuint* vao, GLuint* vbo_pos, GLuint* vbo_rad) {
     srand((unsigned)time(NULL));
     for (int i = 0; i < MAX_PARTICLES; i++) {
-        random_unit_pos(particles[i].position);
-        glm_vec3_zero(particles[i].velocity);
+        random_unit_pos(particles[i].current);
+        glm_vec3_zero(particles[i].previus);
         particles[i].radius = 0.05f;
     }
 
@@ -357,7 +366,7 @@ GLuint init_shader_program(const char *vertexPath, const char *fragmentPath) {
 
 void update_buffers(GLuint vbo_pos, GLuint vbo_rad, int N) {
     for (int i = 0; i < N; i++) {
-        glm_vec3_copy(particles[i].position, positions_buff[i]);
+        glm_vec3_copy(particles[i].current, positions_buff[i]);
         radius_buff[i] = particles[i].radius * 100.0f;
     }
     glBindBuffer(GL_ARRAY_BUFFER, vbo_pos);
