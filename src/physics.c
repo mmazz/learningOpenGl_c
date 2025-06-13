@@ -28,27 +28,51 @@ static inline void get_cell_coords(const vec3 pos, float cellSize, int *ix, int 
     *iz = (int)floorf(pos[2] / cellSize);
 }
 
-void update_physics(Particles* s, float dt, const vec3 boxMin, const vec3 boxMax) {
+
+void update_physics(Particles* p, float radius, float dt, const vec3 boxMin, const vec3 boxMax, bool isABox) {
     // Gravedad
-    s->velocity[1] -= 9.81f * dt;
+    p->velocity[1] -= 9.81f * dt;
 
     // Movimiento
-    glm_vec3_muladds(s->velocity, dt, s->position);
+    glm_vec3_muladds(p->velocity, dt, p->position);
 
-    // Colisiones con caja invisible
-    for (int i = 0; i < 3; ++i) {
-        float min = boxMin[i] + s->radius;
-        float max = boxMax[i] - s->radius;
+    if(isABox){    // Colisiones con caja invisible
+        for (int i = 0; i < 3; ++i) {
+            float min = boxMin[i] + p->radius;
+            float max = boxMax[i] - p->radius;
 
-        if (s->position[i] < min) {
-            s->position[i] = min;
-            s->velocity[i] *= -0.8f; // rebote simple
-        } else if (s->position[i] > max) {
-            s->position[i] = max;
-            s->velocity[i] *= -0.8f;
+            if (p->position[i] < min) {
+                p->position[i] = min;
+                p->velocity[i] *= -0.8f; // rebote simple
+            } else if (p->position[i] > max) {
+                p->position[i] = max;
+                p->velocity[i] *= -0.8f;
+            }
+        }
+    }
+
+    else{
+        // Colisión con esfera de radio fijo centrada en el origen
+        float dist = glm_vec3_norm(p->position);
+        float max_dist = radius - p->radius;
+
+        if (dist > max_dist) {
+            // Reubicar en la superficie
+            vec3 normal;
+            glm_vec3_normalize_to(p->position, normal);  // dirección desde el centro
+
+            glm_vec3_scale(normal, max_dist, p->position);
+
+            // Reflejar velocidad (rebote simple)
+            float v_dot_n = glm_vec3_dot(p->velocity, normal);
+            vec3 v_reflected;
+            glm_vec3_scale(normal, 2.0f * v_dot_n, v_reflected);
+            glm_vec3_sub(p->velocity, v_reflected, p->velocity);
+            glm_vec3_scale(p->velocity, 0.8f, p->velocity); // pérdida de energía
         }
     }
 }
+
 void resolve_sphere_collisions(Particles* spheres, int count) {
     // Parámetro: tamaño de celda = doble del radio máximo
     float maxRadius = 0.0f;

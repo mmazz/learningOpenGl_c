@@ -12,6 +12,6 @@ typedef struct {
     float radius;   // radio de la esfera
 } Particles;
 
-void update_physics(Particles* s, float dt, const vec3 boxMin, const vec3 boxMax);
+void update_physics(Particles* s,float radius, float dt, const vec3 boxMin, const vec3 boxMax, bool isABox);
 void resolve_sphere_collisions(Particles* spheres, int count);
 #endif

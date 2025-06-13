@@ -15,9 +15,12 @@
 #define STEP_RAIN        1000
 #define SCR_WIDTH        800
 #define SCR_HEIGHT       600
+#define M_PI 3.14159265358979323846
+#define M_PI_2 1.57079632679
+#define SPHERE_RADIUS 1.5
 
-static const vec3 BOX_MIN = {-2.0f, -2.0f, -2.0f};
-static const vec3 BOX_MAX = { 2.0f,  2.0f,  2.0f};
+static const vec3 BOX_MIN = {-1.0f, -1.0f, -1.0f};
+static const vec3 BOX_MAX = { 1.0f,  1.0f,  1.0f};
 
 static Particles particles[MAX_PARTICLES];
 static vec3 positions_buff[MAX_PARTICLES];
@@ -39,6 +42,138 @@ static float lastX = 800.0f / 2.0f;
 static float lastY = 600.0f / 2.0f;
 static bool firstMouse = true;
 static bool constrainPitch = true;
+static bool isABox = false;
+
+#define SPHERE_LAT_DIV 10    // anillos de latitud
+#define SPHERE_LON_DIV 10    // meridianos
+#define SPHERE_PTS_PER_LAT 100
+#define SPHERE_PTS_PER_LON 100
+
+static vec3 sphereLatPoints[SPHERE_LAT_DIV * SPHERE_PTS_PER_LAT];
+static vec3 sphereLonPoints[SPHERE_LON_DIV * SPHERE_PTS_PER_LON];
+static GLuint sphereLatVAO, sphereLatVBO;
+static GLuint sphereLonVAO, sphereLonVBO;
+
+
+#define BOX_EDGE_DIV 100  // puntos por arista
+static vec3 boxEdgePoints[12 * BOX_EDGE_DIV];
+static GLuint boxVAO, boxVBO;
+void init_box_enviroment(const vec3 boxMin, const vec3 boxMax) {
+
+    int idx = 0;
+    // definimos las 8 esquinas
+    vec3 corners[8] = {
+        {boxMin[0], boxMin[1], boxMin[2]}, {boxMax[0], boxMin[1], boxMin[2]},
+        {boxMax[0], boxMax[1], boxMin[2]}, {boxMin[0], boxMax[1], boxMin[2]},
+        {boxMin[0], boxMin[1], boxMax[2]}, {boxMax[0], boxMin[1], boxMax[2]},
+        {boxMax[0], boxMax[1], boxMax[2]}, {boxMin[0], boxMax[1], boxMax[2]}
+    };
+    // índices de los 12 bordes (pares de vértices)
+    int edges[12][2] = {
+        {0,1},{1,2},{2,3},{3,0}, // base inferior
+        {4,5},{5,6},{6,7},{7,4}, // base superior
+        {0,4},{1,5},{2,6},{3,7}  // verticales
+    };
+    for (int e = 0; e < 12; ++e) {
+        float *a = corners[edges[e][0]];  // puntero a vec3
+        float *b = corners[edges[e][1]];
+        for (int i = 0; i < BOX_EDGE_DIV; ++i) {
+            float t = (float)i / (BOX_EDGE_DIV - 1);
+            boxEdgePoints[idx][0] = a[0] + (b[0] - a[0]) * t;
+            boxEdgePoints[idx][1] = a[1] + (b[1] - a[1]) * t;
+            boxEdgePoints[idx][2] = a[2] + (b[2] - a[2]) * t;
+            idx++;
+        }
+    }
+    glGenVertexArrays(1, &boxVAO);
+    glGenBuffers(1, &boxVBO);
+    glBindVertexArray(boxVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, boxVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(boxEdgePoints), boxEdgePoints, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,0,(void*)0);
+    glBindVertexArray(0);
+}
+void init_sphere_enviroment(float radius) {
+    // generar latitudes
+    int idx = 0;
+    for (int i = 0; i < SPHERE_LAT_DIV; ++i) {
+        float v = (float)i / (SPHERE_LAT_DIV - 1); // 0..1
+        float phi = v * M_PI - M_PI_2;            // -pi/2..pi/2
+        float y = radius * sinf(phi);
+        float r = radius * cosf(phi);
+        for (int j = 0; j < SPHERE_PTS_PER_LAT; ++j) {
+            float u = (float)j / SPHERE_PTS_PER_LAT;
+            float theta = u * 2.0f * M_PI;
+            sphereLatPoints[idx][0] = r * cosf(theta);
+            sphereLatPoints[idx][1] = y;
+            sphereLatPoints[idx][2] = r * sinf(theta);
+            idx++;
+        }
+    }
+    // generar longitudes (meridianos)
+    idx = 0;
+    for (int i = 0; i < SPHERE_LON_DIV; ++i) {
+        float u = (float)i / SPHERE_LON_DIV;
+        float theta = u * 2.0f * M_PI;  // 0..2pi
+        float cx = cosf(theta);
+        float cz = sinf(theta);
+        for (int j = 0; j < SPHERE_PTS_PER_LON; ++j) {
+            float v = (float)j / (SPHERE_PTS_PER_LON - 1);
+            float phi = v * M_PI - M_PI_2;
+            float y = radius * sinf(phi);
+            float r = radius * cosf(phi);
+            sphereLonPoints[idx][0] = r * cx;
+            sphereLonPoints[idx][1] = y;
+            sphereLonPoints[idx][2] = r * cz;
+            idx++;
+        }
+    }
+    // lat VAO
+    glGenVertexArrays(1, &sphereLatVAO);
+    glGenBuffers(1, &sphereLatVBO);
+    glBindVertexArray(sphereLatVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, sphereLatVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(sphereLatPoints), sphereLatPoints, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, (void*)0);
+    glBindVertexArray(0);
+    // lon VAO
+    glGenVertexArrays(1, &sphereLonVAO);
+    glGenBuffers(1, &sphereLonVBO);
+    glBindVertexArray(sphereLonVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, sphereLonVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(sphereLonPoints), sphereLonPoints, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, (void*)0);
+    glBindVertexArray(0);
+}
+
+void render_box_debug(GLuint shader) {
+    glUseProgram(shader);
+    GLint sizeLoc  = glGetUniformLocation(shader, "pointSize");
+    GLint colorLoc = glGetUniformLocation(shader, "overrideColor");
+    if (sizeLoc >= 0)  glUniform1f(sizeLoc, 2.0f);
+    if (colorLoc >= 0) glUniform3f(colorLoc, 1.0f, 0.3f, 0.3f); // rojo suave
+    glBindVertexArray(boxVAO);
+    glDrawArrays(GL_POINTS, 0, 12 * BOX_EDGE_DIV);
+    glBindVertexArray(0);
+}
+
+void render_sphere_debug(GLuint shaderEnviroment) {
+    glUseProgram(shaderEnviroment);
+    GLint sizeLoc  = glGetUniformLocation(shaderEnviroment, "pointSize");
+    GLint colorLoc = glGetUniformLocation(shaderEnviroment, "overrideColor");
+    if (sizeLoc >= 0)  glUniform1f(sizeLoc, 2.0f);
+    if (colorLoc >= 0) glUniform3f(colorLoc, 0.3f, 0.3f, 1.0f);
+
+    glBindVertexArray(sphereLatVAO);
+    glDrawArrays(GL_POINTS, 0, SPHERE_LAT_DIV * SPHERE_PTS_PER_LAT);
+    // dibujar longitudes
+    glBindVertexArray(sphereLonVAO);
+    glDrawArrays(GL_POINTS, 0, SPHERE_LON_DIV * SPHERE_PTS_PER_LON);
+    glBindVertexArray(0);
+}
 
 void framebuffer_size_callback(GLFWwindow *window, int width, int height);
 void processInput(GLFWwindow* window, float deltaTime);
@@ -49,7 +184,7 @@ bool init_glad();
 void init_texture(GLuint shaderProgram, GLuint *tex, const char *path, const char *uniformName, int textureUnit);
 void do_physics(Particles* spheres, double deltaTime, int num_spheres);
 void init_particles_and_buffers(GLuint* vao, GLuint* vbo_pos, GLuint* vbo_rad);
-void render(GLuint shader, Camera *cam, int activeCount);
+void render(GLFWwindow* window, GLuint shader, GLuint shaderEnviroment, Camera *cam, int activeCount, bool isABox);
 
 GLuint init_shader_program(const char *vertexPath, const char *fragmentPath);
 void set_up_callbacks(GLFWwindow* window, Camera* camera);
@@ -71,12 +206,16 @@ int main() {
     init_particles_and_buffers(&vao, &vbo_pos, &vbo_rad);
 
     GLuint shaderProgram = init_shader_program("src/shaders/vertex_point.glsl", "src/shaders/fragment_point.glsl");
+    GLuint shaderProgramEnviroment = init_shader_program("src/shaders/vertex_enviroment.glsl", "src/shaders/fragment_enviroment.glsl");
 
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_PROGRAM_POINT_SIZE);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
+    if(isABox)
+        init_box_enviroment(BOX_MIN, BOX_MAX);
+    else
+        init_sphere_enviroment(SPHERE_RADIUS);
     int activeCount = 0;
     float spawnTimer = 0.0f;
     while (!glfwWindowShouldClose(window)) {
@@ -92,7 +231,7 @@ int main() {
 
         do_physics(particles, deltaTime, activeCount);
         update_buffers(vbo_pos, vbo_rad, activeCount);
-        render(shaderProgram, &camera, activeCount);
+        render(window, shaderProgram, shaderProgramEnviroment, &camera, activeCount, isABox);
 
         processInput(window, deltaTime);
         snprintf(debugTitle, sizeof(debugTitle),
@@ -227,23 +366,46 @@ void update_buffers(GLuint vbo_pos, GLuint vbo_rad, int N) {
     glBufferSubData(GL_ARRAY_BUFFER, 0, N * sizeof(float), radius_buff);
 }
 
-void render(GLuint shader, Camera *cam, int activeCount) {
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glUseProgram(shader);
+void render(GLFWwindow* window, GLuint shader, GLuint shaderEnviroment, Camera *cam, int activeCount, bool isABox) {
 
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+    glUseProgram(shader);
+    int fbWidth, fbHeight;
+    glfwGetFramebufferSize(window, &fbWidth, &fbHeight);
+    float aspect = (float)fbWidth / (float)fbHeight;
     mat4 proj, view;
-    glm_perspective(glm_rad(cam->Zoom), (float)SCR_WIDTH/SCR_HEIGHT, 0.1f, 100.0f, proj);
+    glm_perspective(glm_rad(cam->Zoom), aspect, 0.1f, 100.0f, proj);
     camera_get_view_matrix(cam, view);
     glUniformMatrix4fv(glGetUniformLocation(shader, "projection"), 1, GL_FALSE, (float*)proj);
     glUniformMatrix4fv(glGetUniformLocation(shader, "view"), 1, GL_FALSE, (float*)view);
 
     glBindVertexArray(vao);
     glDrawArrays(GL_POINTS, 0, activeCount);
+
+    glUseProgram(shaderEnviroment);
+    glUniformMatrix4fv(glGetUniformLocation(shaderEnviroment, "projection"), 1, GL_FALSE, (float*)proj);
+    glUniformMatrix4fv(glGetUniformLocation(shaderEnviroment, "view"), 1, GL_FALSE, (float*)view);
+    glUniform3f(glGetUniformLocation(shaderEnviroment, "overrideColor"), 1.0f, 1.0f, 1.0f); // Blanco, por ejemplo
+    glUniform1f(glGetUniformLocation(shaderEnviroment, "pointSize"), 3.0f);
+    if(isABox){
+        glBindVertexArray(boxVAO);
+        glDrawArrays(GL_POINTS, 0, 12 * BOX_EDGE_DIV);
+        glBindVertexArray(0);
+    }
+    else{
+        glBindVertexArray(sphereLatVAO);
+        glDrawArrays(GL_POINTS, 0, SPHERE_LAT_DIV * SPHERE_PTS_PER_LAT);
+        // dibujar longitudes
+        glBindVertexArray(sphereLonVAO);
+        glDrawArrays(GL_POINTS, 0, SPHERE_LON_DIV * SPHERE_PTS_PER_LON);
+        glBindVertexArray(0);
+    }
 }
 
 void do_physics(Particles* particles, double deltaTime, int num_spheres){
     for (int i = 0; i < num_spheres; i++) {
-        update_physics(&particles[i], deltaTime, BOX_MIN, BOX_MAX);
+        update_physics(&particles[i], SPHERE_RADIUS, deltaTime, BOX_MIN, BOX_MAX, isABox);
     }
     resolve_sphere_collisions(particles, num_spheres);
 }
