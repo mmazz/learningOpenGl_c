@@ -11,7 +11,7 @@
 #include <stdlib.h>
 #include <time.h>
 
-#define MAX_PARTICLES    10000
+#define MAX_PARTICLES    100000
 #define STEP_RAIN        1000
 #define SCR_WIDTH        800
 #define SCR_HEIGHT       600
