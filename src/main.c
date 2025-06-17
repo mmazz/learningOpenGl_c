@@ -1,8 +1,10 @@
 #include "glad/gl.h"
 #include "render/shader.h"
 #include "render/texture.h"
+#include "render/enviroment.h"
 #include "render/camera.h"
 #include "physics/physics.h"
+#include "core/config.h"
 #include <GLFW/glfw3.h>
 #include <cglm/affine.h> // para funciones como glm_rotate, glm_scale
 #include <cglm/cglm.h>
@@ -11,16 +13,8 @@
 #include <stdlib.h>
 #include <time.h>
 
-#define MAX_PARTICLES    100
-#define STEP_RAIN        1000
-#define SCR_WIDTH        800
-#define SCR_HEIGHT       600
-#define M_PI 3.14159265358979323846
-#define M_PI_2 1.57079632679
-#define SPHERE_RADIUS 1.5
+#define MAX_PARTICLES  1000000
 
-static const vec3 BOX_MIN = {-1.0f, -1.0f, -1.0f};
-static const vec3 BOX_MAX = { 1.0f,  1.0f,  1.0f};
 
 static Particles particles[MAX_PARTICLES];
 static vec3 positions_buff[MAX_PARTICLES];
@@ -32,148 +26,31 @@ static char debugTitle[256];
 static float deltaTime = 0.f;
 static float lastFrame = 0.0f;
 
-static inline void random_unit_pos(vec3 out) {
-    out[0] = ((float)rand() / RAND_MAX) * 4.0f - 2.0f;
-    out[1] = ((float)rand() / RAND_MAX) * 4.0f - 2.0f;
-    out[2] = ((float)rand() / RAND_MAX) * 4.0f - 2.0f;
-}
 
+static inline void random_position_for_env(vec3 out, const Config* cfg) {
+    float padding = cfg->ENV_SIZE * 0.4f;  // 10% del tamaño como margen
+
+    while (1) {
+        out[0] = ((float)rand() / RAND_MAX) * (2.0f * (cfg->ENV_SIZE - padding)) - (cfg->ENV_SIZE - padding);
+        out[2] = ((float)rand() / RAND_MAX) * (2.0f * (cfg->ENV_SIZE - padding)) - (cfg->ENV_SIZE - padding);
+        out[1] = ((float)rand() / RAND_MAX) * (cfg->ENV_SIZE - padding) + padding;
+        //printf("%f,%f,%f\n", out[0],out[1],out[2]);
+        if (cfg->ENV_TYPE == ENV_BOX) {
+            return;
+        } else if (cfg->ENV_TYPE == ENV_SPHERE) {
+            float r2 = glm_vec3_norm2(out);
+            if (r2 <= (cfg->ENV_SIZE - padding) * (cfg->ENV_SIZE - padding))
+                return;
+        } else {
+            fprintf(stderr, "Tipo de entorno no soportado\n");
+            return;
+        }
+    }
+}
 static float lastX = 800.0f / 2.0f;
 static float lastY = 600.0f / 2.0f;
 static bool firstMouse = true;
 static bool constrainPitch = true;
-static bool isABox = false;
-
-#define SPHERE_LAT_DIV 10    // anillos de latitud
-#define SPHERE_LON_DIV 10    // meridianos
-#define SPHERE_PTS_PER_LAT 100
-#define SPHERE_PTS_PER_LON 100
-
-static vec3 sphereLatPoints[SPHERE_LAT_DIV * SPHERE_PTS_PER_LAT];
-static vec3 sphereLonPoints[SPHERE_LON_DIV * SPHERE_PTS_PER_LON];
-static GLuint sphereLatVAO, sphereLatVBO;
-static GLuint sphereLonVAO, sphereLonVBO;
-
-
-#define BOX_EDGE_DIV 100  // puntos por arista
-static vec3 boxEdgePoints[12 * BOX_EDGE_DIV];
-static GLuint boxVAO, boxVBO;
-void init_box_enviroment(const vec3 boxMin, const vec3 boxMax) {
-
-    int idx = 0;
-    // definimos las 8 esquinas
-    vec3 corners[8] = {
-        {boxMin[0], boxMin[1], boxMin[2]}, {boxMax[0], boxMin[1], boxMin[2]},
-        {boxMax[0], boxMax[1], boxMin[2]}, {boxMin[0], boxMax[1], boxMin[2]},
-        {boxMin[0], boxMin[1], boxMax[2]}, {boxMax[0], boxMin[1], boxMax[2]},
-        {boxMax[0], boxMax[1], boxMax[2]}, {boxMin[0], boxMax[1], boxMax[2]}
-    };
-    // índices de los 12 bordes (pares de vértices)
-    int edges[12][2] = {
-        {0,1},{1,2},{2,3},{3,0}, // base inferior
-        {4,5},{5,6},{6,7},{7,4}, // base superior
-        {0,4},{1,5},{2,6},{3,7}  // verticales
-    };
-    for (int e = 0; e < 12; ++e) {
-        float *a = corners[edges[e][0]];  // puntero a vec3
-        float *b = corners[edges[e][1]];
-        for (int i = 0; i < BOX_EDGE_DIV; ++i) {
-            float t = (float)i / (BOX_EDGE_DIV - 1);
-            boxEdgePoints[idx][0] = a[0] + (b[0] - a[0]) * t;
-            boxEdgePoints[idx][1] = a[1] + (b[1] - a[1]) * t;
-            boxEdgePoints[idx][2] = a[2] + (b[2] - a[2]) * t;
-            idx++;
-        }
-    }
-    glGenVertexArrays(1, &boxVAO);
-    glGenBuffers(1, &boxVBO);
-    glBindVertexArray(boxVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, boxVBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(boxEdgePoints), boxEdgePoints, GL_STATIC_DRAW);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,0,(void*)0);
-    glBindVertexArray(0);
-}
-void init_sphere_enviroment(float radius) {
-    // generar latitudes
-    int idx = 0;
-    for (int i = 0; i < SPHERE_LAT_DIV; ++i) {
-        float v = (float)i / (SPHERE_LAT_DIV - 1); // 0..1
-        float phi = v * M_PI - M_PI_2;            // -pi/2..pi/2
-        float y = radius * sinf(phi);
-        float r = radius * cosf(phi);
-        for (int j = 0; j < SPHERE_PTS_PER_LAT; ++j) {
-            float u = (float)j / SPHERE_PTS_PER_LAT;
-            float theta = u * 2.0f * M_PI;
-            sphereLatPoints[idx][0] = r * cosf(theta);
-            sphereLatPoints[idx][1] = y;
-            sphereLatPoints[idx][2] = r * sinf(theta);
-            idx++;
-        }
-    }
-    // generar longitudes (meridianos)
-    idx = 0;
-    for (int i = 0; i < SPHERE_LON_DIV; ++i) {
-        float u = (float)i / SPHERE_LON_DIV;
-        float theta = u * 2.0f * M_PI;  // 0..2pi
-        float cx = cosf(theta);
-        float cz = sinf(theta);
-        for (int j = 0; j < SPHERE_PTS_PER_LON; ++j) {
-            float v = (float)j / (SPHERE_PTS_PER_LON - 1);
-            float phi = v * M_PI - M_PI_2;
-            float y = radius * sinf(phi);
-            float r = radius * cosf(phi);
-            sphereLonPoints[idx][0] = r * cx;
-            sphereLonPoints[idx][1] = y;
-            sphereLonPoints[idx][2] = r * cz;
-            idx++;
-        }
-    }
-    // lat VAO
-    glGenVertexArrays(1, &sphereLatVAO);
-    glGenBuffers(1, &sphereLatVBO);
-    glBindVertexArray(sphereLatVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, sphereLatVBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(sphereLatPoints), sphereLatPoints, GL_STATIC_DRAW);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, (void*)0);
-    glBindVertexArray(0);
-    // lon VAO
-    glGenVertexArrays(1, &sphereLonVAO);
-    glGenBuffers(1, &sphereLonVBO);
-    glBindVertexArray(sphereLonVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, sphereLonVBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(sphereLonPoints), sphereLonPoints, GL_STATIC_DRAW);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, (void*)0);
-    glBindVertexArray(0);
-}
-
-void render_box_debug(GLuint shader) {
-    glUseProgram(shader);
-    GLint sizeLoc  = glGetUniformLocation(shader, "pointSize");
-    GLint colorLoc = glGetUniformLocation(shader, "overrideColor");
-    if (sizeLoc >= 0)  glUniform1f(sizeLoc, 2.0f);
-    if (colorLoc >= 0) glUniform3f(colorLoc, 1.0f, 0.3f, 0.3f); // rojo suave
-    glBindVertexArray(boxVAO);
-    glDrawArrays(GL_POINTS, 0, 12 * BOX_EDGE_DIV);
-    glBindVertexArray(0);
-}
-
-void render_sphere_debug(GLuint shaderEnviroment) {
-    glUseProgram(shaderEnviroment);
-    GLint sizeLoc  = glGetUniformLocation(shaderEnviroment, "pointSize");
-    GLint colorLoc = glGetUniformLocation(shaderEnviroment, "overrideColor");
-    if (sizeLoc >= 0)  glUniform1f(sizeLoc, 2.0f);
-    if (colorLoc >= 0) glUniform3f(colorLoc, 0.3f, 0.3f, 1.0f);
-
-    glBindVertexArray(sphereLatVAO);
-    glDrawArrays(GL_POINTS, 0, SPHERE_LAT_DIV * SPHERE_PTS_PER_LAT);
-    // dibujar longitudes
-    glBindVertexArray(sphereLonVAO);
-    glDrawArrays(GL_POINTS, 0, SPHERE_LON_DIV * SPHERE_PTS_PER_LON);
-    glBindVertexArray(0);
-}
 
 void framebuffer_size_callback(GLFWwindow *window, int width, int height);
 void processInput(GLFWwindow* window, float deltaTime);
@@ -182,27 +59,43 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos);
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
 bool init_glad();
 void init_texture(GLuint shaderProgram, GLuint *tex, const char *path, const char *uniformName, int textureUnit);
-void do_physics(Particles* spheres, double deltaTime, int num_spheres);
-void init_particles_and_buffers(GLuint* vao, GLuint* vbo_pos, GLuint* vbo_rad);
-void render(GLFWwindow* window, GLuint shader, GLuint shaderEnviroment, Camera *cam, int activeCount, bool isABox);
+
+void do_physics(Config* config, Particles* particles, double deltaTime, int activeParticles);
+void init_particles_and_buffers(GLuint* vao, GLuint* vbo_pos, GLuint* vbo_rad, Config* config);
+void render(GLFWwindow* window, GLuint shader, GLuint shaderEnviroment, Camera *cam, unsigned int activeCount);
 
 GLuint init_shader_program(const char *vertexPath, const char *fragmentPath);
 void set_up_callbacks(GLFWwindow* window, Camera* camera);
 GLFWwindow* setup_window(int width, int height, const char* title);
 
-void init_particles(Particles* p){
+void init_particles(Particles* p, Config* config){
     for (int i = 0; i < MAX_PARTICLES; i++) {
-        glm_vec3_copy( (vec3){0.0, -9.8, 0.0}, p[i].acceleration);
+        glm_vec3_copy(config->ACCELERATION, p[i].acceleration);
+        radius_buff[i] = particles[i].radius;
     }
 }
+
+Config config;
+unsigned int activeCount = 0;
+float spawnTimer = 0.0f;
+
 int main() {
-    GLFWwindow* window = setup_window(SCR_WIDTH, SCR_HEIGHT, "Simulator");
+    if (!load_config(&config, "data/config.txt")) {
+        fprintf(stderr, "No se pudo cargar configuración\n");
+        return 1;
+    }
+    if(config.INIT_PARTICLES > config.RENDER_PARTICLES && config.RENDER_PARTICLES > MAX_PARTICLES){
+        fprintf(stderr, "No se puede iniciar con mas particulas que las maximas a renderizar ni superar el maximo de 1 000 000 particulas\n");
+        return 1;
+    }
+    print_config(&config);
+    GLFWwindow* window = setup_window(config.SCR_WIDTH, config.SCR_HEIGHT, "Simulator");
     if (!window) {
-        printf("No windows created");
+        printf("No windows created\n");
         return -1;
     }
     if (!init_glad()) {
-        printf("Error at glad init");
+        printf("Error at glad init\n");
         return -1;
     }
     printf("Renderer: %s\n", glGetString(GL_RENDERER));
@@ -210,7 +103,7 @@ int main() {
     printf("Version:  %s\n", glGetString(GL_VERSION));
     Camera camera = camera_init(cameraPos, cameraUp, YAW, PITCH);
     set_up_callbacks(window, &camera);
-    init_particles_and_buffers(&vao, &vbo_pos, &vbo_rad);
+    init_particles_and_buffers(&vao, &vbo_pos, &vbo_rad, &config);
 
     GLuint shaderProgram = init_shader_program("shaders/vertex_point.glsl", "shaders/fragment_point.glsl");
     GLuint shaderProgramEnviroment = init_shader_program("shaders/vertex_enviroment.glsl", "shaders/fragment_enviroment.glsl");
@@ -220,28 +113,34 @@ int main() {
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    init_particles(particles);
-    if(isABox)
-        init_box_enviroment(BOX_MIN, BOX_MAX);
-    else
-        init_sphere_enviroment(SPHERE_RADIUS);
-    int activeCount = 0;
-    float spawnTimer = 0.0f;
+    init_particles(particles, &config);
+    switch (config.ENV_TYPE) {
+        case ENV_BOX:
+            init_box_environment(&config);
+            break;
+        case ENV_SPHERE:
+            init_sphere_enviroment(config.ENV_SIZE);
+            break;
+        default:
+            fprintf(stderr, "ENV_TYPE desconocido\n");
+    }
+
+
     while (!glfwWindowShouldClose(window)) {
         float currentFrame = glfwGetTime();
         deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;
         spawnTimer += deltaTime;
 
-        if (spawnTimer > 0.5f && activeCount < MAX_PARTICLES) {
+        if (spawnTimer > 0.5f && activeCount <= config.RENDER_PARTICLES) {
             spawnTimer = 0.0f;
-            activeCount = fmin(activeCount + STEP_RAIN, MAX_PARTICLES);
+            activeCount = fmin(activeCount + config.STEP_PARTICLES, MAX_PARTICLES);
         }
 
-        do_physics(particles, deltaTime, activeCount);
+        do_physics(&config, particles, deltaTime, activeCount);
         update_buffers(vbo_pos, vbo_rad, activeCount);
-        render(window, shaderProgram, shaderProgramEnviroment, &camera, activeCount, isABox);
-
+        render(window, shaderProgram, shaderProgramEnviroment, &camera, activeCount);
+        render_env(window, &shaderProgramEnviroment, &camera, &config);
         processInput(window, deltaTime);
         snprintf(debugTitle, sizeof(debugTitle),
                              "Mi Simulación — Partículas: %d  FPS: %.1f",
@@ -256,12 +155,12 @@ int main() {
     return 0;
 }
 
-void init_particles_and_buffers(GLuint* vao, GLuint* vbo_pos, GLuint* vbo_rad) {
+void init_particles_and_buffers(GLuint* vao, GLuint* vbo_pos, GLuint* vbo_rad, Config* config) {
     srand((unsigned)time(NULL));
     for (int i = 0; i < MAX_PARTICLES; i++) {
-        random_unit_pos(particles[i].current);
-        glm_vec3_zero(particles[i].previus);
-        particles[i].radius = 0.05f;
+        random_position_for_env(particles[i].current, config);
+        glm_vec3_copy(particles[i].current, particles[i].previus);
+        particles[i].radius = config->PARTICLE_RADIUS;
     }
 
     glGenVertexArrays(1, vao);
@@ -281,7 +180,11 @@ void init_particles_and_buffers(GLuint* vao, GLuint* vbo_pos, GLuint* vbo_rad) {
 
     glBindVertexArray(0);
 }
-
+void reinit_simulation(Config *config){
+    spawnTimer = 0.0f;
+    activeCount = config->INIT_PARTICLES;
+    init_particles_and_buffers(&vao, &vbo_pos, &vbo_rad, config);
+}
 // Quiero poder subir y bajar por z
 void processInput(GLFWwindow* window, float deltaTime) {
     Camera* camera = (Camera*)glfwGetWindowUserPointer(window);
@@ -297,6 +200,10 @@ void processInput(GLFWwindow* window, float deltaTime) {
         camera_process_keyboard(camera, CAMERA_LEFT, deltaTime);
     if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
         camera_process_keyboard(camera, CAMERA_RIGHT, deltaTime);
+    if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) {
+        load_config(&config, "data/config.txt");
+        reinit_simulation(&config);
+    }
 }
 
 void mouse_callback(GLFWwindow* window, double xpos, double ypos)
@@ -367,7 +274,7 @@ GLuint init_shader_program(const char *vertexPath, const char *fragmentPath) {
 void update_buffers(GLuint vbo_pos, GLuint vbo_rad, int N) {
     for (int i = 0; i < N; i++) {
         glm_vec3_copy(particles[i].current, positions_buff[i]);
-        radius_buff[i] = particles[i].radius * 100.0f;
+        //radius_buff[i] = particles[i].radius;
     }
     glBindBuffer(GL_ARRAY_BUFFER, vbo_pos);
     glBufferSubData(GL_ARRAY_BUFFER, 0, N * sizeof(vec3), positions_buff);
@@ -375,48 +282,31 @@ void update_buffers(GLuint vbo_pos, GLuint vbo_rad, int N) {
     glBufferSubData(GL_ARRAY_BUFFER, 0, N * sizeof(float), radius_buff);
 }
 
-void render(GLFWwindow* window, GLuint shader, GLuint shaderEnviroment, Camera *cam, int activeCount, bool isABox) {
-
+void render(GLFWwindow* window, GLuint shader, GLuint shaderEnviroment, Camera *cam, unsigned int activeCount) {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
     glUseProgram(shader);
     int fbWidth, fbHeight;
     glfwGetFramebufferSize(window, &fbWidth, &fbHeight);
+
     float aspect = (float)fbWidth / (float)fbHeight;
     mat4 proj, view;
     glm_perspective(glm_rad(cam->Zoom), aspect, 0.1f, 100.0f, proj);
     camera_get_view_matrix(cam, view);
+    float fovRadians = glm_rad(cam->Zoom); // cam->Zoom en grados
+    float pointScale = fbHeight / (2.0f * tanf(fovRadians / 2.0f));
+    glUniform1f(glGetUniformLocation(shader, "pointScale"), pointScale);
     glUniformMatrix4fv(glGetUniformLocation(shader, "projection"), 1, GL_FALSE, (float*)proj);
     glUniformMatrix4fv(glGetUniformLocation(shader, "view"), 1, GL_FALSE, (float*)view);
-
     glBindVertexArray(vao);
     glDrawArrays(GL_POINTS, 0, activeCount);
-
-    glUseProgram(shaderEnviroment);
-    glUniformMatrix4fv(glGetUniformLocation(shaderEnviroment, "projection"), 1, GL_FALSE, (float*)proj);
-    glUniformMatrix4fv(glGetUniformLocation(shaderEnviroment, "view"), 1, GL_FALSE, (float*)view);
-    glUniform3f(glGetUniformLocation(shaderEnviroment, "overrideColor"), 1.0f, 1.0f, 1.0f); // Blanco, por ejemplo
-    glUniform1f(glGetUniformLocation(shaderEnviroment, "pointSize"), 3.0f);
-    if(isABox){
-        glBindVertexArray(boxVAO);
-        glDrawArrays(GL_POINTS, 0, 12 * BOX_EDGE_DIV);
-        glBindVertexArray(0);
-    }
-    else{
-        glBindVertexArray(sphereLatVAO);
-        glDrawArrays(GL_POINTS, 0, SPHERE_LAT_DIV * SPHERE_PTS_PER_LAT);
-        // dibujar longitudes
-        glBindVertexArray(sphereLonVAO);
-        glDrawArrays(GL_POINTS, 0, SPHERE_LON_DIV * SPHERE_PTS_PER_LON);
-        glBindVertexArray(0);
-    }
 }
 
-void do_physics(Particles* particles, double deltaTime, int num_spheres){
-    for (int i = 0; i < num_spheres; i++) {
-        update_physics(&particles[i], SPHERE_RADIUS, deltaTime, BOX_MIN, BOX_MAX, isABox);
+void do_physics(Config* config, Particles* particles, double deltaTime, int activeParticles){
+    for (int i = 0; i < activeParticles; i++) {
+        update_physics(config, &particles[i], deltaTime);
     }
-    resolve_sphere_collisions(particles, num_spheres);
+    resolve_collisions(particles, activeParticles);
 }
 
 void init_texture(GLuint shaderProgram, GLuint *tex, const char *path, const char *uniformName, int textureUnit) {

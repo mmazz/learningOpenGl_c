@@ -28,7 +28,9 @@ static inline void get_cell_coords(const vec3 pos, float cellSize, int *ix, int 
     *iz = (int)floorf(pos[2] / cellSize);
 }
 
-void collision_box(Particles* p, const vec3 boxMin, const vec3 boxMax) {
+void collision_box(Config *config, Particles* p) {
+    float boxMin[3] = {-config->ENV_SIZE, -config->ENV_SIZE, -config->ENV_SIZE};
+    float boxMax[3] = { config->ENV_SIZE,  config->ENV_SIZE,  config->ENV_SIZE};
     for (int i = 0; i < 3; ++i) {
         float min = boxMin[i] + p->radius;
         float max = boxMax[i] - p->radius;
@@ -43,10 +45,10 @@ void collision_box(Particles* p, const vec3 boxMin, const vec3 boxMax) {
     }
 }
 
-void collision_sphere(Particles* p, float radius) {
+void collision_sphere(Config *config, Particles* p) {
     // Colisión con esfera de radio fijo centrada en el origen
     float dist = glm_vec3_norm(p->current);
-    float max_dist = radius - p->radius;
+    float max_dist = config->ENV_SIZE - p->radius;
 
     if (dist > max_dist) {
         // Reubicar en la superficie
@@ -64,7 +66,7 @@ void collision_sphere(Particles* p, float radius) {
     }
 }
 
-void update_physics(Particles* p, float radius, float dt, const vec3 boxMin, const vec3 boxMax, bool isABox) {
+void update_physics(Config *config, Particles* p,  float dt) {
     float dt2 = dt*dt;
     vec3 res;
 
@@ -80,18 +82,22 @@ void update_physics(Particles* p, float radius, float dt, const vec3 boxMin, con
     // Update
     glm_vec3_copy(p->current, p->previus);
     glm_vec3_copy(res, p->current);
-
-    if(isABox)
-        collision_box(p, boxMin, boxMax);
-    else
-        collision_sphere( p, radius);
+    switch (config->ENV_TYPE) {
+        case ENV_BOX:
+            collision_box(config, p);
+            break;
+        case ENV_SPHERE:
+            collision_sphere(config, p);
+            break;
+    }
 }
 
-void resolve_sphere_collisions(Particles* spheres, int count) {
+
+void resolve_collisions(Particles* particle, int count) {
     // Parámetro: tamaño de celda = doble del radio máximo
     float maxRadius = 0.0f;
     for (int i = 0; i < count; i++)
-        if (spheres[i].radius > maxRadius) maxRadius = spheres[i].radius;
+        if (particle[i].radius > maxRadius) maxRadius = particle[i].radius;
     float cellSize = maxRadius * 2.0f;
 
     // 1) Limpiar hash
@@ -100,7 +106,7 @@ void resolve_sphere_collisions(Particles* spheres, int count) {
     // 2) Insertar cada partícula en su celda
     for (int i = 0; i < count; i++) {
         int cx, cy, cz;
-        get_cell_coords(spheres[i].current, cellSize, &cx, &cy, &cz);
+        get_cell_coords(particle[i].current, cellSize, &cx, &cy, &cz);
         unsigned int h = spatial_hash(cx, cy, cz);
         if (hashCount[h] < MAX_BUCKET_SIZE)
             hashTable[h][hashCount[h]++] = i;
@@ -116,7 +122,7 @@ void resolve_sphere_collisions(Particles* spheres, int count) {
         for (int i = 0; i < count; i++) {
             // Localizar su celda base
             int cx, cy, cz;
-            get_cell_coords(spheres[i].current, cellSize, &cx, &cy, &cz);
+            get_cell_coords(particle[i].current, cellSize, &cx, &cy, &cz);
 
             // Chequear vecinos en las 27 celdas alrededor
             for (int dx = -1; dx <= 1; dx++) {
@@ -129,9 +135,9 @@ void resolve_sphere_collisions(Particles* spheres, int count) {
                     if (j <= i) continue;  // evita duplicados y self
 
                     vec3 diff;
-                    glm_vec3_sub(spheres[j].current, spheres[i].current, diff);
+                    glm_vec3_sub(particle[j].current, particle[i].current, diff);
                     float dist = glm_vec3_norm(diff);
-                    float minDist = spheres[i].radius + spheres[j].radius;
+                    float minDist = particle[i].radius + particle[j].radius;
                     if (dist <= 0.0f || dist >= minDist + padding) continue;
 
                     // 3a) Separación de posiciones
@@ -141,13 +147,13 @@ void resolve_sphere_collisions(Particles* spheres, int count) {
                     vec3 correction;
                     glm_vec3_scale(normal, overlap * 0.5f, correction);
                     // desplaza i y j en direcciones opuestas
-                    glm_vec3_sub(spheres[i].current, correction, spheres[i].current);
-                    glm_vec3_add(spheres[j].current, correction, spheres[j].current);
+                    glm_vec3_sub(particle[i].current, correction, particle[i].current);
+                    glm_vec3_add(particle[j].current, correction, particle[j].current);
 
                     // 3b) Impulso de colisión elástica
                     // calcula componente normal de la velocidad relativa
                     vec3 relVel;
-                    glm_vec3_sub(spheres[j].previus, spheres[i].previus, relVel);
+                    glm_vec3_sub(particle[j].previus, particle[i].previus, relVel);
                     float vRel = glm_vec3_dot(relVel, normal);
                     if (vRel > 0.0f) continue;  // se alejan, no aplica impulso
 
@@ -155,8 +161,8 @@ void resolve_sphere_collisions(Particles* spheres, int count) {
                     float jImpulse = -(1.0f + restitution) * vRel * 0.5f;
                     vec3 impulse;
                     glm_vec3_scale(normal, jImpulse, impulse);
-                    glm_vec3_sub(spheres[i].previus, impulse, spheres[i].previus);
-                    glm_vec3_add(spheres[j].previus, impulse, spheres[j].previus);
+                    glm_vec3_sub(particle[i].previus, impulse, particle[i].previus);
+                    glm_vec3_add(particle[j].previus, impulse, particle[j].previus);
                 }
             } } }
         }

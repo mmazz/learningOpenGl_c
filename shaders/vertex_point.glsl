@@ -2,8 +2,9 @@
 layout (location = 0) in vec3 aPos;
 layout (location = 1) in float aRadius;
 
-uniform mat4 projection;
 uniform mat4 view;
+uniform mat4 projection;
+uniform float pointScale;
 
 out float radius;
 
@@ -14,6 +15,6 @@ void main()
 
     // Ajustar tamaño de punto para que mantenga tamaño "real" en pantalla
     float dist = -viewPos.z;
-    gl_PointSize = aRadius / dist * 50.0; // Factor para escalar, ajustar a tu cámara
+    gl_PointSize = aRadius * pointScale / dist;
     radius = aRadius;
 }

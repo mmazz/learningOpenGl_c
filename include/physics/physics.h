@@ -5,6 +5,7 @@
 #include <cglm/cglm.h>
 #include <stddef.h>
 #include <glad/gl.h>
+#include "core/config.h"
 
 typedef struct {
     vec3 current;  // posición actual
@@ -13,9 +14,9 @@ typedef struct {
     float radius;   // radio de la esfera
 } Particles;
 
-void update_physics(Particles* s,float radius, float dt, const vec3 boxMin, const vec3 boxMax, bool isABox);
-void resolve_sphere_collisions(Particles* spheres, int count);
+void update_physics(Config *config, Particles* s, float dt);
+void resolve_collisions(Particles* spheres, int count);
 
-void collision_sphere(Particles* p, float radius);
-void collision_box(Particles* p, const vec3 boxMin, const vec3 boxMax);
+void collision_sphere(Config *config, Particles* p);
+void collision_box(Config *config, Particles* p);
 #endif

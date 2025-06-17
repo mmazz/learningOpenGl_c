@@ -6,10 +6,12 @@ LIBS = -lglfw -ldl -lGL -lm
 SRC = \
 	src/main.c \
 	src/core/gl.c \
+	src/core/config.c \
 	src/render/shader.c \
 	src/render/mesh.c \
 	src/render/camera.c \
 	src/render/texture.c \
+	src/render/enviroment.c \
 	src/physics/physics.c
 
 # Reglas para convertir src/... en build/obj/...
