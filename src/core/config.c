@@ -47,8 +47,7 @@ int load_config(Config* cfg, const char* filename) {
             cfg->ENV_SIZE = strtof(value, NULL);
         }else if (strcmp(key, "ENV_DIV") == 0) {
             cfg->ENV_DIV = (unsigned int)atoi(value);
-        }
-        else if (strcmp(key, "ENV_TYPE") == 0) {
+        } else if (strcmp(key, "ENV_TYPE") == 0) {
             if (strcmp(value, "BOX") == 0)
                 cfg->ENV_TYPE = ENV_BOX;
             else if (strcmp(value, "SPHERE") == 0)
@@ -56,6 +55,17 @@ int load_config(Config* cfg, const char* filename) {
             else {
                 fprintf(stderr, "Unknown ENV_TYPE: %s\n", value);
                 cfg->ENV_TYPE = ENV_BOX; // default
+            }
+        } else if (strcmp(key, "PARTICLE_TYPE") == 0) {
+            if (strcmp(value, "POINT") == 0)
+                cfg->PARTICLE_TYPE= POINT_TYPE;
+            else if (strcmp(value, "MESH") == 0)
+                cfg->PARTICLE_TYPE= MESH_TYPE;
+         //   else if (strcmp(value, "OBJ") == 0)
+         //       cfg->PARTICLE_TYPE= OBJ_TYPE;
+            else {
+                fprintf(stderr, "Unknown ENV_TYPE: %s\n", value);
+                cfg->PARTICLE_TYPE = POINT_TYPE; // default
             }
         }
 
@@ -77,5 +87,6 @@ void print_config(const Config* cfg) {
     printf("ENV_RADIUS: %f\n", cfg->ENV_SIZE);
     printf("ENV_DIV: %u\n", cfg->ENV_DIV);
     printf("ENV_TYPE: %u\n", cfg->ENV_TYPE);
+    printf("PARTICLE_TYPE: %u\n", cfg->PARTICLE_TYPE);
 }
 

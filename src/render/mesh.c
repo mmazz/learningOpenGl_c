@@ -74,6 +74,7 @@ Mesh mesh_generate_cube(void) {
 
     return m;
 }
+
 Mesh mesh_generate_sphere(int latDiv, int lonDiv) {
     Mesh m = {0};
 
@@ -127,7 +128,6 @@ Mesh mesh_generate_sphere(int latDiv, int lonDiv) {
         }
     }
 
-    // ✅ Tamaños reales de buffers (en bytes)
     m.vertexSize = vertCount * 5 * sizeof(float);     // 5 floats por vértice
     m.indexSize  = idxCount * sizeof(unsigned int);
 

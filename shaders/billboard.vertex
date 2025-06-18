@@ -1,10 +1,20 @@
 #version 330 core
-layout (location = 0) in vec4 aPosRadius; // xyz + radius
-uniform mat4 view;
+
+layout(location = 0) in vec3 aPos;
+
 uniform mat4 projection;
+uniform mat4 view;
+uniform float pointScale;     // = fbHeight / (2·tan(fov/2))
+uniform float particleRadius; // radio en unidades de mundo
 
 void main() {
-    gl_Position = projection * view * vec4(aPosRadius.xyz, 1.0);
-    gl_PointSize = aPosRadius.w * 100.0 / gl_Position.w; // escala con distancia
-}
+    // 1) Llevar al espacio de cámara
+    vec4 viewPos = view * vec4(aPos, 1.0);
 
+    // 2) Proyección
+    gl_Position = projection * viewPos;
+
+    // 3) Tamaño en pixeles: radius * scale / distancia
+    // viewPos.z<0 si la cámara mira hacia -Z, tomamos abs
+    gl_PointSize = 2.0*pointScale * particleRadius / abs(viewPos.z);
+}

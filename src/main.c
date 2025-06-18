@@ -2,6 +2,7 @@
 #include "render/shader.h"
 #include "render/texture.h"
 #include "render/enviroment.h"
+#include "render/mesh.h"
 #include "render/camera.h"
 #include "physics/physics.h"
 #include "core/config.h"
@@ -18,8 +19,6 @@
 
 static Particles particles[MAX_PARTICLES];
 static vec3 positions_buff[MAX_PARTICLES];
-static float radius_buff[MAX_PARTICLES];
-static GLuint vao, vbo_pos, vbo_rad;
 
 static char debugTitle[256];
 
@@ -28,13 +27,12 @@ static float lastFrame = 0.0f;
 
 
 static inline void random_position_for_env(vec3 out, const Config* cfg) {
-    float padding = cfg->ENV_SIZE * 0.4f;  // 10% del tamaño como margen
+    float padding = cfg->ENV_SIZE * 0.4f;  // 40% del tamaño como margen
 
     while (1) {
         out[0] = ((float)rand() / RAND_MAX) * (2.0f * (cfg->ENV_SIZE - padding)) - (cfg->ENV_SIZE - padding);
         out[2] = ((float)rand() / RAND_MAX) * (2.0f * (cfg->ENV_SIZE - padding)) - (cfg->ENV_SIZE - padding);
         out[1] = ((float)rand() / RAND_MAX) * (cfg->ENV_SIZE - padding) + padding;
-        //printf("%f,%f,%f\n", out[0],out[1],out[2]);
         if (cfg->ENV_TYPE == ENV_BOX) {
             return;
         } else if (cfg->ENV_TYPE == ENV_SPHERE) {
@@ -53,32 +51,38 @@ static bool firstMouse = true;
 static bool constrainPitch = true;
 
 void framebuffer_size_callback(GLFWwindow *window, int width, int height);
-void processInput(GLFWwindow* window, float deltaTime);
-void update_buffers(GLuint vbo_pos, GLuint vbo_rad, int N);
 void mouse_callback(GLFWwindow* window, double xpos, double ypos);
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
 bool init_glad();
 void init_texture(GLuint shaderProgram, GLuint *tex, const char *path, const char *uniformName, int textureUnit);
 
+void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods);
 void do_physics(Config* config, Particles* particles, double deltaTime, int activeParticles);
-void init_particles_and_buffers(GLuint* vao, GLuint* vbo_pos, GLuint* vbo_rad, Config* config);
-void render(GLFWwindow* window, GLuint shader, GLuint shaderEnviroment, Camera *cam, unsigned int activeCount);
-
+void init_vertex_buffers(Config* config, GLuint* vaoPoint, GLuint* vaoMesh,
+                         GLuint* meshVBO, GLuint* meshEBO, GLuint* instanceVBO,
+                         GLuint* pointVBO, GLuint* shaderPoint, GLuint* shaderMesh);
+void init_mesh_vao(GLuint* vaoMesh, GLuint* meshVBO, GLuint* meshEBO,
+                   GLuint* instanceVBO, GLuint* shaderMesh);
+void init_point_vao(GLuint* vaoPoint, GLuint* pointVBO, GLuint* shaderPoint);
+void render(GLFWwindow* window, Config *config, GLuint shaderPoint, GLuint shaderMesh,
+            GLuint vaoPoint, GLuint vaoMesh, Camera *cam, unsigned int activeCount);
+void update_buffers(Config* config, GLuint *pointVBO, GLuint* instanceVBO, int N);
 GLuint init_shader_program(const char *vertexPath, const char *fragmentPath);
 void set_up_callbacks(GLFWwindow* window, Camera* camera);
 GLFWwindow* setup_window(int width, int height, const char* title);
 
-void init_particles(Particles* p, Config* config){
-    for (int i = 0; i < MAX_PARTICLES; i++) {
-        glm_vec3_copy(config->ACCELERATION, p[i].acceleration);
-        radius_buff[i] = particles[i].radius;
-    }
-}
+void processInputMovement(GLFWwindow* window, float deltaTime);
+void init_particles(Particles* p, Config* config);
+void init_particle_buffers(GLuint* vao, GLuint* vbo, GLuint* ebo, Config* config,  int N);
+void update_particle_buffers(Config* config, Particles* particles, int N);
 
 Config config;
 unsigned int activeCount = 0;
 float spawnTimer = 0.0f;
-
+GLuint shaderPoint, shaderMesh;
+GLuint vaoPoint, vaoMesh, meshVBO, meshEBO, instanceVBO, pointVBO;
+static GLuint indexCount = 0;  // para mesh
+bool isPause = false;
 int main() {
     if (!load_config(&config, "data/config.txt")) {
         fprintf(stderr, "No se pudo cargar configuración\n");
@@ -103,23 +107,24 @@ int main() {
     printf("Version:  %s\n", glGetString(GL_VERSION));
     Camera camera = camera_init(cameraPos, cameraUp, YAW, PITCH);
     set_up_callbacks(window, &camera);
-    init_particles_and_buffers(&vao, &vbo_pos, &vbo_rad, &config);
 
-    GLuint shaderProgram = init_shader_program("shaders/vertex_point.glsl", "shaders/fragment_point.glsl");
     GLuint shaderProgramEnviroment = init_shader_program("shaders/vertex_enviroment.glsl", "shaders/fragment_enviroment.glsl");
 
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_PROGRAM_POINT_SIZE);
     glEnable(GL_BLEND);
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
+    init_vertex_buffers(&config,& vaoPoint, &vaoMesh, &meshVBO, &meshEBO, &instanceVBO,
+                         &pointVBO, &shaderPoint,  &shaderMesh);
     init_particles(particles, &config);
     switch (config.ENV_TYPE) {
         case ENV_BOX:
             init_box_environment(&config);
             break;
         case ENV_SPHERE:
-            init_sphere_enviroment(config.ENV_SIZE);
+            init_sphere_enviroment(&config);
             break;
         default:
             fprintf(stderr, "ENV_TYPE desconocido\n");
@@ -132,16 +137,18 @@ int main() {
         lastFrame = currentFrame;
         spawnTimer += deltaTime;
 
-        if (spawnTimer > 0.5f && activeCount <= config.RENDER_PARTICLES) {
+        if (!isPause && spawnTimer > 0.5f && activeCount <= config.RENDER_PARTICLES) {
             spawnTimer = 0.0f;
             activeCount = fmin(activeCount + config.STEP_PARTICLES, MAX_PARTICLES);
         }
 
+        processInputMovement(window, deltaTime);
         do_physics(&config, particles, deltaTime, activeCount);
-        update_buffers(vbo_pos, vbo_rad, activeCount);
-        render(window, shaderProgram, shaderProgramEnviroment, &camera, activeCount);
+        update_buffers(&config, &pointVBO, &instanceVBO, activeCount);
+        render(window, &config, shaderPoint,shaderMesh,
+            vaoPoint, vaoMesh, &camera, activeCount);
         render_env(window, &shaderProgramEnviroment, &camera, &config);
-        processInput(window, deltaTime);
+
         snprintf(debugTitle, sizeof(debugTitle),
                              "Mi Simulación — Partículas: %d  FPS: %.1f",
                              activeCount,
@@ -150,60 +157,223 @@ int main() {
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
-    glDeleteProgram(shaderProgram);
+    glDeleteProgram(shaderPoint);
+    glDeleteProgram(shaderMesh);
+    glDeleteProgram(shaderProgramEnviroment);
     glfwTerminate();
     return 0;
 }
 
-void init_particles_and_buffers(GLuint* vao, GLuint* vbo_pos, GLuint* vbo_rad, Config* config) {
+
+void init_particles(Particles* p, Config* config){
     srand((unsigned)time(NULL));
     for (int i = 0; i < MAX_PARTICLES; i++) {
         random_position_for_env(particles[i].current, config);
         glm_vec3_copy(particles[i].current, particles[i].previus);
         particles[i].radius = config->PARTICLE_RADIUS;
+        glm_vec3_copy(config->ACCELERATION, p[i].acceleration);
     }
+}
 
-    glGenVertexArrays(1, vao);
-    glBindVertexArray(*vao);
+void init_point_vao(GLuint* vaoPoint, GLuint* pointVBO, GLuint* shaderPoint) {
+    // 1) Generar VAO + VBO
+    glGenVertexArrays(1, vaoPoint);
+    glGenBuffers(1, pointVBO);
 
-    glGenBuffers(1, vbo_pos);
-    glBindBuffer(GL_ARRAY_BUFFER, *vbo_pos);
-    glBufferData(GL_ARRAY_BUFFER, MAX_PARTICLES * sizeof(vec3), NULL, GL_DYNAMIC_DRAW);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, (void*)0);
+    // 2) Configurar VAO
+    glBindVertexArray(*vaoPoint);
+      glBindBuffer(GL_ARRAY_BUFFER, *pointVBO);
+      glBufferData(GL_ARRAY_BUFFER, MAX_PARTICLES * sizeof(vec3), NULL, GL_DYNAMIC_DRAW);
+      // atributo 0 = posición
+      glEnableVertexAttribArray(0);
+      glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(vec3), (void*)0);
+    glBindVertexArray(0);
 
-    glGenBuffers(1, vbo_rad);
-    glBindBuffer(GL_ARRAY_BUFFER, *vbo_rad);
-    glBufferData(GL_ARRAY_BUFFER, MAX_PARTICLES * sizeof(float), NULL, GL_DYNAMIC_DRAW);
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 0, (void*)0);
+    // 3) Compilar shader
+    *shaderPoint = init_shader_program("shaders/billboard.vertex",
+                                      "shaders/billboard.frag");
+}
+void init_mesh_vao(GLuint* vaoMesh, GLuint* meshVBO, GLuint* meshEBO,
+                   GLuint* instanceVBO, GLuint* shaderMesh) {
+    // 1) Generar VAO + buffers
+    glGenVertexArrays(1, vaoMesh);
+    glGenBuffers(1, meshVBO);
+    glGenBuffers(1, meshEBO);
+    glGenBuffers(1, instanceVBO);
+
+    // 2) Generar geometría de la esfera
+    Mesh particle_shape = mesh_generate_sphere(20, 20);
+    indexCount = particle_shape.indexCount;
+
+    // 3) Configurar VAO
+    glBindVertexArray(*vaoMesh);
+
+      // 3a) VBO de la malla
+      glBindBuffer(GL_ARRAY_BUFFER, *meshVBO);
+      glBufferData(GL_ARRAY_BUFFER, particle_shape.vertexSize,
+                   particle_shape.vertices, GL_STATIC_DRAW);
+      // EBO de índices
+      glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, *meshEBO);
+      glBufferData(GL_ELEMENT_ARRAY_BUFFER, particle_shape.indexSize,
+                   particle_shape.indices, GL_STATIC_DRAW);
+
+      // atributos de la esfera
+      // posición (location = 0)
+      glEnableVertexAttribArray(0);
+      glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+      // UV (location = 1)
+      glEnableVertexAttribArray(1);
+      glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
+
+      // 3b) VBO de instancias
+      glBindBuffer(GL_ARRAY_BUFFER, *instanceVBO);
+      glBufferData(GL_ARRAY_BUFFER, MAX_PARTICLES * sizeof(vec3), NULL, GL_DYNAMIC_DRAW);
+      // posición‑instancia (location = 2)
+      glEnableVertexAttribArray(2);
+      glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(vec3), (void*)0);
+      glVertexAttribDivisor(2, 1);  // cambia por instancia
 
     glBindVertexArray(0);
+
+    // 4) Compilar shader
+    *shaderMesh = init_shader_program("shaders/vertexInstance.glsl",
+                                     "shaders/fragmentInstance.glsl");
 }
+
+void init_vertex_buffers(Config* config, GLuint* vaoPoint, GLuint* vaoMesh,
+                         GLuint* meshVBO, GLuint* meshEBO, GLuint* instanceVBO,
+                         GLuint* pointVBO, GLuint* shaderPoint, GLuint* shaderMesh) {
+    if (config->PARTICLE_TYPE == POINT_TYPE) {
+        init_point_vao(vaoPoint, pointVBO, shaderPoint);
+    } else if (config->PARTICLE_TYPE == MESH_TYPE) {
+        init_mesh_vao(vaoMesh, meshVBO, meshEBO, instanceVBO, shaderMesh);
+    }
+}
+
+void update_buffers(Config* config, GLuint* pointVBO, GLuint* instanceVBO, int N){
+    // —– Prepara tu array de posiciones —–
+    for (int i = 0; i < N; i++) {
+        glm_vec3_copy(particles[i].current, positions_buff[i]);
+    }
+    // —– Elige el buffer correcto —–
+    if (config->PARTICLE_TYPE == MESH_TYPE) {
+        // instanced rendering: actualiza instanceVBO
+        glBindBuffer(GL_ARRAY_BUFFER, *instanceVBO);
+    }
+    else { // POINT_TYPE
+        // puntos: actualiza pointVBO
+        glBindBuffer(GL_ARRAY_BUFFER, *pointVBO);
+    }
+
+    // —– Sube los datos al buffer activo —–
+    glBufferSubData(GL_ARRAY_BUFFER, 0, N * sizeof(vec3), positions_buff
+    );
+
+    // —– Limpieza opcional —–
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+}
+
+void render(GLFWwindow* window, Config *config, GLuint shaderPoint, GLuint shaderMesh,
+            GLuint vaoPoint, GLuint vaoMesh, Camera *cam, unsigned int activeCount) {
+    // 1) Limpieza de pantalla
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    // (Depth test y face culling deberían habilitarse una sola vez en init)
+
+
+    // 2) Elegir shader y VAO
+    const bool isPoint = (config->PARTICLE_TYPE == POINT_TYPE);
+    GLuint shader = isPoint ? shaderPoint : shaderMesh;
+    GLuint vao    = isPoint ? vaoPoint   : vaoMesh;
+
+    glUseProgram(shader);
+
+    // 3) Cálculos de cámara/común
+    int fbW, fbH;
+    glfwGetFramebufferSize(window, &fbW, &fbH);
+    float aspect = (float)fbW / (float)fbH;
+
+    mat4 proj, view;
+    glm_perspective(glm_rad(cam->Zoom), aspect, 0.1f, 100.0f, proj);
+    camera_get_view_matrix(cam, view);
+
+    // Uniforms comunes
+    GLint locProj = glGetUniformLocation(shader, "projection");
+    GLint locView = glGetUniformLocation(shader, "view");
+    GLint locRad  = glGetUniformLocation(shader, "particleRadius");
+    glUniformMatrix4fv(locProj, 1, GL_FALSE, (float*)proj);
+    glUniformMatrix4fv(locView, 1, GL_FALSE, (float*)view);
+    glUniform1f(locRad, config->PARTICLE_RADIUS);
+
+    // 4) Uniforms y estado específico de POINT
+    if (isPoint) {
+        float fovRad   = glm_rad(cam->Zoom);
+        float pointScl = fbH / (2.0f * tanf(fovRad * 0.5f));
+        GLint locPS    = glGetUniformLocation(shader, "pointScale");
+        glUniform1f(locPS, pointScl);
+
+        glEnable(GL_PROGRAM_POINT_SIZE);
+    }
+    else{
+        glUniform3f(glGetUniformLocation(shaderMesh, "lightDir"),     0.5f, -1.0f, 0.3f);
+        glUniform3f(glGetUniformLocation(shaderMesh, "lightColor"),   1.0f, 1.0f, 1.0f);
+        glUniform3f(glGetUniformLocation(shaderMesh, "objectColor"),  0.2f, 0.6f, 1.0f);
+    }    // 5) Dibujar
+    glBindVertexArray(vao);
+    if (isPoint) {
+        glDrawArrays(GL_POINTS, 0, activeCount);
+    } else {
+        glDrawElementsInstanced(GL_TRIANGLES, indexCount, GL_UNSIGNED_INT, 0, activeCount);
+    }
+    glBindVertexArray(0);
+
+    // 6) Restaurar estado
+    if (isPoint) {
+        glDisable(GL_PROGRAM_POINT_SIZE);
+    }
+}
+
 void reinit_simulation(Config *config){
     spawnTimer = 0.0f;
     activeCount = config->INIT_PARTICLES;
-    init_particles_and_buffers(&vao, &vbo_pos, &vbo_rad, config);
+    //init_vertex_buffers(&vao, &vbo, &ebo, config);
 }
-// Quiero poder subir y bajar por z
-void processInput(GLFWwindow* window, float deltaTime) {
+void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
     Camera* camera = (Camera*)glfwGetWindowUserPointer(window);
-    if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+    if (key == GLFW_KEY_ENTER && action == GLFW_PRESS) {
+        isPause = !isPause;
+    }
+    if ((key == GLFW_KEY_ESCAPE || key == GLFW_KEY_Q) && action == GLFW_PRESS) {
         glfwSetWindowShouldClose(window, true);
-    if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
-        glfwSetWindowShouldClose(window, true);
-    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-        camera_process_keyboard(camera, CAMERA_FORWARD, deltaTime);
-    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-        camera_process_keyboard(camera, CAMERA_BACKWARD, deltaTime);
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-        camera_process_keyboard(camera, CAMERA_LEFT, deltaTime);
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-        camera_process_keyboard(camera, CAMERA_RIGHT, deltaTime);
-    if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) {
+    }
+    if (key == GLFW_KEY_R && action == GLFW_PRESS) {
         load_config(&config, "data/config.txt");
         reinit_simulation(&config);
     }
+}
+void processInputMovement(GLFWwindow* window, float deltaTime) {
+    Camera* camera = glfwGetWindowUserPointer(window);
+        float velocity = camera->MovementSpeed * deltaTime;
+
+    bool space      = glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS;
+    bool ctrl       = (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS) ||
+                      (glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS);
+    if (space) {
+        if (ctrl) {
+            // con Ctrl: bajamos en Y
+            camera->Position[1] -= velocity;
+        } else {
+            // sin Ctrl: subimos en Y
+            camera->Position[1] += velocity;
+        }
+    }
+    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+        camera_process_keyboard(camera, CAMERA_FORWARD,  deltaTime);
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+        camera_process_keyboard(camera, CAMERA_BACKWARD, deltaTime);
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+        camera_process_keyboard(camera, CAMERA_LEFT,     deltaTime);
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+        camera_process_keyboard(camera, CAMERA_RIGHT,    deltaTime);
 }
 
 void mouse_callback(GLFWwindow* window, double xpos, double ypos)
@@ -234,28 +404,6 @@ void framebuffer_size_callback(GLFWwindow *window, int width, int height) {
   glViewport(0, 0, width, height);
 }
 
-void init_buffers(unsigned int *VAO, unsigned int *VBO, unsigned int *EBO, float *vertices, size_t vertices_size, unsigned int *indices, size_t indices_size) {
-    glGenVertexArrays(1, VAO);
-    glGenBuffers(1, VBO);
-    glGenBuffers(1, EBO);
-
-    glBindVertexArray(*VAO);
-
-    glBindBuffer(GL_ARRAY_BUFFER, *VBO);
-    glBufferData(GL_ARRAY_BUFFER, vertices_size, vertices, GL_STATIC_DRAW);
-
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, *EBO);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices_size, indices, GL_STATIC_DRAW);
-
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
-    glEnableVertexAttribArray(1);
-
-    glBindVertexArray(0);
-
-}
-
 bool init_glad() {
     if (!gladLoadGL((GLADloadfunc)glfwGetProcAddress)) {
         fprintf(stderr, "Failed to initialize GLAD\n");
@@ -270,37 +418,36 @@ GLuint init_shader_program(const char *vertexPath, const char *fragmentPath) {
     compile_shader(&fragmentShader, GL_FRAGMENT_SHADER, fragmentPath);
     return link_shader(vertexShader, fragmentShader);
 }
-
-void update_buffers(GLuint vbo_pos, GLuint vbo_rad, int N) {
-    for (int i = 0; i < N; i++) {
-        glm_vec3_copy(particles[i].current, positions_buff[i]);
-        //radius_buff[i] = particles[i].radius;
-    }
-    glBindBuffer(GL_ARRAY_BUFFER, vbo_pos);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, N * sizeof(vec3), positions_buff);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo_rad);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, N * sizeof(float), radius_buff);
-}
-
-void render(GLFWwindow* window, GLuint shader, GLuint shaderEnviroment, Camera *cam, unsigned int activeCount) {
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
-    glUseProgram(shader);
-    int fbWidth, fbHeight;
-    glfwGetFramebufferSize(window, &fbWidth, &fbHeight);
-
-    float aspect = (float)fbWidth / (float)fbHeight;
-    mat4 proj, view;
-    glm_perspective(glm_rad(cam->Zoom), aspect, 0.1f, 100.0f, proj);
-    camera_get_view_matrix(cam, view);
-    float fovRadians = glm_rad(cam->Zoom); // cam->Zoom en grados
-    float pointScale = fbHeight / (2.0f * tanf(fovRadians / 2.0f));
-    glUniform1f(glGetUniformLocation(shader, "pointScale"), pointScale);
-    glUniformMatrix4fv(glGetUniformLocation(shader, "projection"), 1, GL_FALSE, (float*)proj);
-    glUniformMatrix4fv(glGetUniformLocation(shader, "view"), 1, GL_FALSE, (float*)view);
-    glBindVertexArray(vao);
-    glDrawArrays(GL_POINTS, 0, activeCount);
-}
+//void render(GLFWwindow* window, Config *config, GLuint shader, GLuint shaderEnviroment, Camera *cam, unsigned int activeCount) {
+//    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+//    glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+//    glUseProgram(shader);
+//    int fbWidth, fbHeight;
+//    glfwGetFramebufferSize(window, &fbWidth, &fbHeight);
+//    float aspect = (float)fbWidth / (float)fbHeight;
+//    mat4 proj, view;
+//    glm_perspective(glm_rad(cam->Zoom), aspect, 0.1f, 100.0f, proj);
+//    camera_get_view_matrix(cam, view);
+//    float fovRadians = glm_rad(cam->Zoom); // cam->Zoom en grados
+//    float pointScale = fbHeight / (2.0f * tanf(fovRadians / 2.0f));
+//    glUniform1f(glGetUniformLocation(shader, "pointScale"), pointScale);
+//    glUniformMatrix4fv(glGetUniformLocation(shader, "projection"), 1, GL_FALSE, (float*)proj);
+//    glUniformMatrix4fv(glGetUniformLocation(shader, "view"), 1, GL_FALSE, (float*)view);
+//    glBindVertexArray(vao);
+//    switch (config->PARTICLE_TYPE) {
+//        case MESH_TYPE:
+//            glDrawElementsInstanced(GL_TRIANGLES, indexCount, GL_UNSIGNED_INT, 0, activeCount);
+//            break;
+//        case POINT_TYPE:
+//            glEnable(GL_PROGRAM_POINT_SIZE);
+//            glDrawArrays(GL_POINTS, 0, activeCount);
+//            break;
+//        case OBJ_TYPE:
+//            //obj_init();
+//            break;
+//    }
+//    glBindVertexArray(0);
+//}
 
 void do_physics(Config* config, Particles* particles, double deltaTime, int activeParticles){
     for (int i = 0; i < activeParticles; i++) {
@@ -338,5 +485,6 @@ void set_up_callbacks(GLFWwindow* window, Camera* camera) {
     glfwSetWindowUserPointer(window, camera);
     glfwSetCursorPosCallback(window, mouse_callback);
     glfwSetScrollCallback(window, scroll_callback);
+    glfwSetKeyCallback(window, key_callback);
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 }

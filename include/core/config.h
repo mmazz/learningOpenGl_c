@@ -4,6 +4,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+typedef enum{
+    POINT_TYPE = 0,
+    MESH_TYPE = 1,
+    //OBJ_TYPE = 2,
+} PartType;
 
 typedef enum {
     ENV_BOX = 0,
@@ -22,6 +27,7 @@ typedef struct {
     float ENV_SIZE;
     unsigned int ENV_DIV;
     EnvType ENV_TYPE;
+    PartType PARTICLE_TYPE;
 } Config;
 
 void trim(char* str);

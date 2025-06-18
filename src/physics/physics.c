@@ -35,26 +35,28 @@ void collision_box(Config *config, Particles* p) {
         float min = boxMin[i] + p->radius;
         float max = boxMax[i] - p->radius;
 
+        float disp = p->current[i] - p->previus[i];
         if (p->current[i] < min) {
             p->current[i] = min;
-            p->previus[i] *= -0.8f; // rebote simple
+            p->previus[i] = p->current[i]+disp; // rebote simple
         } else if (p->current[i] > max) {
             p->current[i] = max;
-            p->previus[i] *= -0.8f;
+            p->previus[i] = p->current[i]+disp;
         }
     }
 }
-
 void collision_sphere(Config *config, Particles* p) {
-    // Colisión con esfera de radio fijo centrada en el origen
+    float env_radius = 2.0f * config->ENV_SIZE;
+    float max_dist = env_radius - p->radius;
+
     float dist = glm_vec3_norm(p->current);
-    float max_dist = config->ENV_SIZE - p->radius;
 
     if (dist > max_dist) {
-        // Reubicar en la superficie
+        // Normal hacia afuera
         vec3 normal;
-        glm_vec3_normalize_to(p->current, normal);  // dirección desde el centro
+        glm_vec3_normalize_to(p->current, normal);
 
+        // Reubicar en la superficie
         glm_vec3_scale(normal, max_dist, p->current);
 
         // Reflejar velocidad (rebote simple)
@@ -62,9 +64,12 @@ void collision_sphere(Config *config, Particles* p) {
         vec3 v_reflected;
         glm_vec3_scale(normal, 2.0f * v_dot_n, v_reflected);
         glm_vec3_sub(p->previus, v_reflected, p->previus);
-        glm_vec3_scale(p->previus, 0.8f, p->previus); // pérdida de energía
+
+        // Opcional: pérdida de energía
+        // glm_vec3_scale(p->previus, 0.9f, p->previus);
     }
 }
+
 
 void update_physics(Config *config, Particles* p,  float dt) {
     float dt2 = dt*dt;

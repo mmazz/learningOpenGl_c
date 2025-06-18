@@ -8,7 +8,6 @@
 
 void  render_env(GLFWwindow* window, GLuint *shaderProgramEnviroment, Camera* camera, Config* config);
 void init_box_environment(const Config* cfg);
-void init_sphere_enviroment(float radius);
+void init_sphere_enviroment(const Config* cfg);
 void render_sphere_debug(GLuint shaderEnviroment);
-void init_sphere_enviroment(float radius);
 #endif

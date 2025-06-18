@@ -4,10 +4,16 @@
 //
 
 
-static vec3*  envEdgePoints = NULL;
-static GLuint envVAO = 0, envVBO = 0;
+static vec3*  envBoxPoints = NULL;
+static GLuint envBoxVAO = 0, envBoxVBO = 0;
 static size_t pointCount = 0;
 
+#define SPHERE_LAT_DIV 20    // anillos de latitud
+#define SPHERE_PTS_PER_LAT 100
+
+static vec3* envSpherePoints = NULL;
+static GLuint envSphereVAO = 0, envSphereVBO = 0;
+static int spherePointCount = SPHERE_LAT_DIV * SPHERE_PTS_PER_LAT;
 
 void render_env(GLFWwindow* window, GLuint *shaderProgram, Camera* camera, Config* config){
     int fbWidth, fbHeight;
@@ -22,33 +28,35 @@ void render_env(GLFWwindow* window, GLuint *shaderProgram, Camera* camera, Confi
     glUniformMatrix4fv(glGetUniformLocation(*shaderProgram, "view"), 1, GL_FALSE, (float*)view);
     glUniform3f(glGetUniformLocation(*shaderProgram, "overrideColor"), 1.0f, 1.0f, 1.0f); // Blanco, por ejemplo
     glUniform1f(glGetUniformLocation(*shaderProgram, "pointSize"), 3.0f);
-//    if(isABox){
-        glBindVertexArray(envVAO);
-        glDrawArrays(GL_POINTS, 0, 12 * config->ENV_DIV);
-        glBindVertexArray(0);
- //   }
-//    else{
-//        glBindVertexArray(sphereLatVAO);
-//        glDrawArrays(GL_POINTS, 0, SPHERE_LAT_DIV * SPHERE_PTS_PER_LAT);
-//        // dibujar longitudes
-//        glBindVertexArray(sphereLonVAO);
-//        glDrawArrays(GL_POINTS, 0, SPHERE_LON_DIV * SPHERE_PTS_PER_LON);
-//        glBindVertexArray(0);
-//    }
+
+    switch (config->ENV_TYPE) {
+        case ENV_BOX:
+            glBindVertexArray(envBoxVAO);
+            glDrawArrays(GL_POINTS, 0, 12 * config->ENV_DIV);
+            glBindVertexArray(0);
+            break;
+        case ENV_SPHERE:
+            glBindVertexArray(envSphereVAO);
+            glDrawArrays(GL_POINTS, 0, spherePointCount);
+            glBindVertexArray(0);
+            break;
+    }
+
+
 }
-void init_box_environment(const Config* cfg) {
+void init_box_environment(const Config* config) {
     // número total de puntos: 12 aristas * divisiones
-    pointCount = 12 * cfg->ENV_DIV;
+    pointCount = 12 * config->ENV_DIV;
 
     // (re)aloca el buffer de puntos
-    free(envEdgePoints);
-    envEdgePoints = malloc(sizeof(vec3) * pointCount);
-    if (!envEdgePoints) {
+    free(envBoxPoints);
+    envBoxPoints = malloc(sizeof(vec3) * pointCount);
+    if (!envBoxPoints) {
         fprintf(stderr, "Failed to alloc boxEdgePoints\n");
         exit(1);
     }
-    float boxMin[3] = {-cfg->ENV_SIZE, -cfg->ENV_SIZE, -cfg->ENV_SIZE};
-    float boxMax[3] = { cfg->ENV_SIZE,  cfg->ENV_SIZE,  cfg->ENV_SIZE};
+    float boxMin[3] = {-config->ENV_SIZE, -config->ENV_SIZE, -config->ENV_SIZE};
+    float boxMax[3] = { config->ENV_SIZE,  config->ENV_SIZE,  config->ENV_SIZE};
 
     vec3 corners[8] = {
         {boxMin[0], boxMin[1], boxMin[2]},
@@ -73,57 +81,46 @@ void init_box_environment(const Config* cfg) {
         glm_vec3_copy(corners[edges[e][0]],a);
         vec3 b;
         glm_vec3_copy(corners[edges[e][1]],b);
-        for (unsigned int i = 0; i < cfg->ENV_DIV; ++i) {
-            float t = (float)i / (cfg->ENV_DIV - 1);
+        for (unsigned int i = 0; i < config->ENV_DIV; ++i) {
+            float t = (float)i / (config->ENV_DIV - 1);
             // interpolación lineal
-            envEdgePoints[idx][0] = a[0] + (b[0] - a[0]) * t;
-            envEdgePoints[idx][1] = a[1] + (b[1] - a[1]) * t;
-            envEdgePoints[idx][2] = a[2] + (b[2] - a[2]) * t;
+            envBoxPoints[idx][0] = a[0] + (b[0] - a[0]) * t;
+            envBoxPoints[idx][1] = a[1] + (b[1] - a[1]) * t;
+            envBoxPoints[idx][2] = a[2] + (b[2] - a[2]) * t;
             idx++;
         }
     }
 
     // (re)inicializar VAO/VBO
-    if (envVAO) glDeleteVertexArrays(1, &envVAO);
-    if (envVBO) glDeleteBuffers(1, &envVBO);
+    if (envBoxVAO) glDeleteVertexArrays(1, &envBoxVAO);
+    if (envBoxVBO) glDeleteBuffers(1, &envBoxVBO);
 
-    glGenVertexArrays(1, &envVAO);
-    glGenBuffers(1, &envVBO);
-    glBindVertexArray(envVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, envVBO);
-    glBufferData(GL_ARRAY_BUFFER,
-                 sizeof(vec3) * pointCount,
-                 envEdgePoints,
-                 GL_STATIC_DRAW);
+    glGenVertexArrays(1, &envBoxVAO);
+    glGenBuffers(1, &envBoxVBO);
+    glBindVertexArray(envBoxVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, envBoxVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vec3) * pointCount, envBoxPoints, GL_STATIC_DRAW);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
     glBindVertexArray(0);
 }
 
-void render_box_debug(GLuint shader) {
+void render_box_debug(GLuint shader, Config *config) {
     glUseProgram(shader);
     GLint sizeLoc  = glGetUniformLocation(shader, "pointSize");
     GLint colorLoc = glGetUniformLocation(shader, "overrideColor");
     if (sizeLoc >= 0)  glUniform1f(sizeLoc, 2.0f);
     if (colorLoc >= 0) glUniform3f(colorLoc, 1.0f, 0.3f, 0.3f); // rojo suave
-    glBindVertexArray(envVAO);
- //   glDrawArrays(GL_POINTS, 0, 12 * BOX_EDGE_DIV);
+    glBindVertexArray(envBoxVAO);
+    glDrawArrays(GL_POINTS, 0, 12 * config->ENV_DIV);
     glBindVertexArray(0);
 }
 
-#define SPHERE_LAT_DIV 20    // anillos de latitud
-#define SPHERE_LON_DIV 0    // meridianos
-#define SPHERE_PTS_PER_LAT 100
-#define SPHERE_PTS_PER_LON 100
 
-static vec3 sphereLatPoints[SPHERE_LAT_DIV * SPHERE_PTS_PER_LAT];
-static vec3 sphereLonPoints[SPHERE_LON_DIV * SPHERE_PTS_PER_LON];
-static GLuint sphereLatVAO, sphereLatVBO;
-static GLuint sphereLonVAO, sphereLonVBO;
-
-
-
-void init_sphere_enviroment(float radius) {
+void init_sphere_enviroment(const Config* config) {
+    float radius = 2*config->ENV_SIZE;
+    free(envSpherePoints);
+    envSpherePoints = malloc(sizeof(vec3) * spherePointCount);
     // generar latitudes
     int idx = 0;
     for (int i = 0; i < SPHERE_LAT_DIV; ++i) {
@@ -134,45 +131,18 @@ void init_sphere_enviroment(float radius) {
         for (int j = 0; j < SPHERE_PTS_PER_LAT; ++j) {
             float u = (float)j / SPHERE_PTS_PER_LAT;
             float theta = u * 2.0f * M_PI;
-            sphereLatPoints[idx][0] = r * cosf(theta);
-            sphereLatPoints[idx][1] = y;
-            sphereLatPoints[idx][2] = r * sinf(theta);
+            envSpherePoints[idx][0] = r * cosf(theta);
+            envSpherePoints[idx][1] = y;
+            envSpherePoints[idx][2] = r * sinf(theta);
             idx++;
         }
     }
-    // generar longitudes (meridianos)
-    idx = 0;
-    for (int i = 0; i < SPHERE_LON_DIV; ++i) {
-        float u = (float)i / SPHERE_LON_DIV;
-        float theta = u * 2.0f * M_PI;  // 0..2pi
-        float cx = cosf(theta);
-        float cz = sinf(theta);
-        for (int j = 0; j < SPHERE_PTS_PER_LON; ++j) {
-            float v = (float)j / (SPHERE_PTS_PER_LON - 1);
-            float phi = v * M_PI - M_PI_2;
-            float y = radius * sinf(phi);
-            float r = radius * cosf(phi);
-            sphereLonPoints[idx][0] = r * cx;
-            sphereLonPoints[idx][1] = y;
-            sphereLonPoints[idx][2] = r * cz;
-            idx++;
-        }
-    }
-    // lat VAO
-    glGenVertexArrays(1, &sphereLatVAO);
-    glGenBuffers(1, &sphereLatVBO);
-    glBindVertexArray(sphereLatVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, sphereLatVBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(sphereLatPoints), sphereLatPoints, GL_STATIC_DRAW);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, (void*)0);
-    glBindVertexArray(0);
-    // lon VAO
-    glGenVertexArrays(1, &sphereLonVAO);
-    glGenBuffers(1, &sphereLonVBO);
-    glBindVertexArray(sphereLonVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, sphereLonVBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(sphereLonPoints), sphereLonPoints, GL_STATIC_DRAW);
+    spherePointCount = idx;
+    glGenVertexArrays(1, &envSphereVAO);
+    glGenBuffers(1, &envSphereVBO);
+    glBindVertexArray(envSphereVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, envSphereVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vec3) * idx, envSpherePoints, GL_STATIC_DRAW);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, (void*)0);
     glBindVertexArray(0);
@@ -186,12 +156,8 @@ void render_sphere_debug(GLuint shaderEnvironment) {
     GLint colorLoc = glGetUniformLocation(shaderEnvironment, "overrideColor");
     if (sizeLoc >= 0)  glUniform1f(sizeLoc, 2.0f);
     if (colorLoc >= 0) glUniform3f(colorLoc, 0.3f, 0.3f, 1.0f);
-
-    glBindVertexArray(sphereLatVAO);
+    glBindVertexArray(envSphereVAO);
     glDrawArrays(GL_POINTS, 0, SPHERE_LAT_DIV * SPHERE_PTS_PER_LAT);
-    // dibujar longitudes
-    glBindVertexArray(sphereLonVAO);
-    glDrawArrays(GL_POINTS, 0, SPHERE_LON_DIV * SPHERE_PTS_PER_LON);
     glBindVertexArray(0);
 }
 
