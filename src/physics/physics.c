@@ -79,7 +79,6 @@ void collision_sphere(Config *config, Particles* p) {
 }
 
 
-
 void update_physics(Config *config, Particles* p,  float dt) {
     float dt2 = dt*dt;
     vec3 res;

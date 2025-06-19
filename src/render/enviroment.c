@@ -1,8 +1,6 @@
 #include "render/enviroment.h"
 #define M_PI 3.14159265358979323846
 #define M_PI_2 M_PI/2
-//
-
 
 static vec3*  envBoxPoints = NULL;
 static GLuint envBoxVAO = 0, envBoxVBO = 0;
