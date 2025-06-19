@@ -25,26 +25,42 @@ static char debugTitle[256];
 static float deltaTime = 0.f;
 static float lastFrame = 0.0f;
 
-
 static inline void random_position_for_env(vec3 out, const Config* cfg) {
-    float padding = cfg->ENV_SIZE * 0.4f;  // 40% del tamaño como margen
+    float padding = cfg->ENV_SIZE * 0.4f;
+    float max_r = cfg->ENV_SIZE - padding;
 
-    while (1) {
-        out[0] = ((float)rand() / RAND_MAX) * (2.0f * (cfg->ENV_SIZE - padding)) - (cfg->ENV_SIZE - padding);
-        out[2] = ((float)rand() / RAND_MAX) * (2.0f * (cfg->ENV_SIZE - padding)) - (cfg->ENV_SIZE - padding);
-        out[1] = ((float)rand() / RAND_MAX) * (cfg->ENV_SIZE - padding) + padding;
-        if (cfg->ENV_TYPE == ENV_BOX) {
-            return;
-        } else if (cfg->ENV_TYPE == ENV_SPHERE) {
-            float r2 = glm_vec3_norm2(out);
-            if (r2 <= (cfg->ENV_SIZE - padding) * (cfg->ENV_SIZE - padding))
+    if (cfg->ENV_TYPE == ENV_BOX) {
+        for (int i = 0; i < 3; i++) {
+            out[i] = ((float)rand() / RAND_MAX) * (2.0f * max_r) - max_r;
+        }
+        return;
+    }
+
+    else if (cfg->ENV_TYPE == ENV_SPHERE) {
+        while (1) {
+            // Coordenadas x, y, z aleatorias en [-1,1] pero solo Y ≥ 0
+            float x = 2.0f * ((float)rand() / RAND_MAX) - 1.0f;
+            float y =       ((float)rand() / RAND_MAX);  // solo positivo
+            float z = 2.0f * ((float)rand() / RAND_MAX) - 1.0f;
+
+            float r2 = x*x + y*y + z*z;
+            if (r2 <= 1.0f) {
+                // Distribución uniforme en el volumen usando raíz cúbica
+                float scale = cbrtf((float)rand() / RAND_MAX);
+                out[0] = x * max_r * scale;
+                out[1] = y * max_r * scale;  // ya está en la parte superior
+                out[2] = z * max_r * scale;
                 return;
-        } else {
-            fprintf(stderr, "Tipo de entorno no soportado\n");
-            return;
+            }
         }
     }
+
+    else {
+        fprintf(stderr, "Tipo de entorno no soportado\n");
+        out[0] = out[1] = out[2] = 0.0f;
+    }
 }
+
 static float lastX = 800.0f / 2.0f;
 static float lastY = 600.0f / 2.0f;
 static bool firstMouse = true;
@@ -251,9 +267,17 @@ void init_vertex_buffers(Config* config, GLuint* vaoPoint, GLuint* vaoMesh,
 }
 
 void update_buffers(Config* config, GLuint* pointVBO, GLuint* instanceVBO, int N){
+    float angle = glfwGetTime() * 0.1f;
+    mat4 model;
+    glm_mat4_identity(model);
+    glm_rotate(model, angle, (vec3){0.0f, 1.0f, 0.0f});
+
     // —– Prepara tu array de posiciones —–
     for (int i = 0; i < N; i++) {
-        glm_vec3_copy(particles[i].current, positions_buff[i]);
+        vec4 pos4 = { particles[i].current[0], particles[i].current[1], particles[i].current[2], 1.0f };
+        vec4 rotated;
+        glm_mat4_mulv(model, pos4, rotated);
+        glm_vec3_copy(rotated, positions_buff[i]);
     }
     // —– Elige el buffer correcto —–
     if (config->PARTICLE_TYPE == MESH_TYPE) {
@@ -266,8 +290,7 @@ void update_buffers(Config* config, GLuint* pointVBO, GLuint* instanceVBO, int N
     }
 
     // —– Sube los datos al buffer activo —–
-    glBufferSubData(GL_ARRAY_BUFFER, 0, N * sizeof(vec3), positions_buff
-    );
+    glBufferSubData(GL_ARRAY_BUFFER, 0, N * sizeof(vec3), positions_buff);
 
     // —– Limpieza opcional —–
     glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -277,7 +300,6 @@ void render(GLFWwindow* window, Config *config, GLuint shaderPoint, GLuint shade
             GLuint vaoPoint, GLuint vaoMesh, Camera *cam, unsigned int activeCount) {
     // 1) Limpieza de pantalla
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    // (Depth test y face culling deberían habilitarse una sola vez en init)
 
 
     // 2) Elegir shader y VAO
@@ -295,7 +317,6 @@ void render(GLFWwindow* window, Config *config, GLuint shaderPoint, GLuint shade
     mat4 proj, view;
     glm_perspective(glm_rad(cam->Zoom), aspect, 0.1f, 100.0f, proj);
     camera_get_view_matrix(cam, view);
-
     // Uniforms comunes
     GLint locProj = glGetUniformLocation(shader, "projection");
     GLint locView = glGetUniformLocation(shader, "view");
@@ -337,6 +358,7 @@ void reinit_simulation(Config *config){
     activeCount = config->INIT_PARTICLES;
     //init_vertex_buffers(&vao, &vbo, &ebo, config);
 }
+
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
     Camera* camera = (Camera*)glfwGetWindowUserPointer(window);
     if (key == GLFW_KEY_ENTER && action == GLFW_PRESS) {
@@ -359,10 +381,8 @@ void processInputMovement(GLFWwindow* window, float deltaTime) {
                       (glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS);
     if (space) {
         if (ctrl) {
-            // con Ctrl: bajamos en Y
             camera->Position[1] -= velocity;
         } else {
-            // sin Ctrl: subimos en Y
             camera->Position[1] += velocity;
         }
     }
@@ -418,36 +438,6 @@ GLuint init_shader_program(const char *vertexPath, const char *fragmentPath) {
     compile_shader(&fragmentShader, GL_FRAGMENT_SHADER, fragmentPath);
     return link_shader(vertexShader, fragmentShader);
 }
-//void render(GLFWwindow* window, Config *config, GLuint shader, GLuint shaderEnviroment, Camera *cam, unsigned int activeCount) {
-//    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-//    glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
-//    glUseProgram(shader);
-//    int fbWidth, fbHeight;
-//    glfwGetFramebufferSize(window, &fbWidth, &fbHeight);
-//    float aspect = (float)fbWidth / (float)fbHeight;
-//    mat4 proj, view;
-//    glm_perspective(glm_rad(cam->Zoom), aspect, 0.1f, 100.0f, proj);
-//    camera_get_view_matrix(cam, view);
-//    float fovRadians = glm_rad(cam->Zoom); // cam->Zoom en grados
-//    float pointScale = fbHeight / (2.0f * tanf(fovRadians / 2.0f));
-//    glUniform1f(glGetUniformLocation(shader, "pointScale"), pointScale);
-//    glUniformMatrix4fv(glGetUniformLocation(shader, "projection"), 1, GL_FALSE, (float*)proj);
-//    glUniformMatrix4fv(glGetUniformLocation(shader, "view"), 1, GL_FALSE, (float*)view);
-//    glBindVertexArray(vao);
-//    switch (config->PARTICLE_TYPE) {
-//        case MESH_TYPE:
-//            glDrawElementsInstanced(GL_TRIANGLES, indexCount, GL_UNSIGNED_INT, 0, activeCount);
-//            break;
-//        case POINT_TYPE:
-//            glEnable(GL_PROGRAM_POINT_SIZE);
-//            glDrawArrays(GL_POINTS, 0, activeCount);
-//            break;
-//        case OBJ_TYPE:
-//            //obj_init();
-//            break;
-//    }
-//    glBindVertexArray(0);
-//}
 
 void do_physics(Config* config, Particles* particles, double deltaTime, int activeParticles){
     for (int i = 0; i < activeParticles; i++) {

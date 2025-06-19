@@ -45,30 +45,39 @@ void collision_box(Config *config, Particles* p) {
         }
     }
 }
+
 void collision_sphere(Config *config, Particles* p) {
     float env_radius = 2.0f * config->ENV_SIZE;
-    float max_dist = env_radius - p->radius;
+    float max_dist   = env_radius - p->radius;
 
     float dist = glm_vec3_norm(p->current);
 
     if (dist > max_dist) {
-        // Normal hacia afuera
+        // Vector normal desde el centro hacia la partícula
         vec3 normal;
         glm_vec3_normalize_to(p->current, normal);
 
-        // Reubicar en la superficie
+        // Calcular velocidad implícita (Verlet)
+        vec3 velocity;
+        glm_vec3_sub(p->current, p->previus, velocity);
+
+        // Reubicar la partícula justo sobre la superficie
         glm_vec3_scale(normal, max_dist, p->current);
 
-        // Reflejar velocidad (rebote simple)
-        float v_dot_n = glm_vec3_dot(p->previus, normal);
+        // Reflejar la velocidad
+        float v_dot_n = glm_vec3_dot(velocity, normal);
         vec3 v_reflected;
         glm_vec3_scale(normal, 2.0f * v_dot_n, v_reflected);
-        glm_vec3_sub(p->previus, v_reflected, p->previus);
+        glm_vec3_sub(velocity, v_reflected, velocity);
 
-        // Opcional: pérdida de energía
-        // glm_vec3_scale(p->previus, 0.9f, p->previus);
+        // Aplicar pérdida de energía
+        glm_vec3_scale(velocity, 0.9f, velocity);  // podés ajustar 0.9f
+
+        // Reconstruir previus en base a la nueva posición y velocidad
+        glm_vec3_sub(p->current, velocity, p->previus);
     }
 }
+
 
 
 void update_physics(Config *config, Particles* p,  float dt) {
