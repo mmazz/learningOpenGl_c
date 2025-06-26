@@ -91,7 +91,8 @@ void processInputMovement(GLFWwindow* window, float deltaTime);
 void init_particles(Particles* p, Config* config);
 void init_particle_buffers(GLuint* vao, GLuint* vbo, GLuint* ebo, Config* config,  int N);
 void update_particle_buffers(Config* config, Particles* particles, int N);
-
+void change_env(Config* config);
+void reinit_simulation(Config *config, bool resetAll);
 Config config;
 unsigned int activeCount = 0;
 float spawnTimer = 0.0f;
@@ -180,7 +181,21 @@ int main() {
     return 0;
 }
 
-
+void change_env(Config* config){
+    switch (config->ENV_TYPE) {
+        case ENV_BOX:
+            init_sphere_enviroment(config);
+            config->ENV_TYPE = ENV_SPHERE;
+            break;
+        case ENV_SPHERE:
+            init_box_environment(config);
+            config->ENV_TYPE = ENV_BOX;
+            break;
+        default:
+            fprintf(stderr, "ENV_TYPE desconocido\n");
+    }
+    reinit_simulation(config, false);
+}
 void init_particles(Particles* p, Config* config){
     srand((unsigned)time(NULL));
     for (int i = 0; i < MAX_PARTICLES; i++) {
@@ -209,6 +224,7 @@ void init_point_vao(GLuint* vaoPoint, GLuint* pointVBO, GLuint* shaderPoint) {
     *shaderPoint = init_shader_program("shaders/billboard.vertex",
                                       "shaders/billboard.frag");
 }
+
 void init_mesh_vao(GLuint* vaoMesh, GLuint* meshVBO, GLuint* meshEBO,
                    GLuint* instanceVBO, GLuint* shaderMesh) {
     // 1) Generar VAO + buffers
@@ -353,10 +369,28 @@ void render(GLFWwindow* window, Config *config, GLuint shaderPoint, GLuint shade
     }
 }
 
-void reinit_simulation(Config *config){
+
+void reset_buffer_pos(bool resetAll){
+    vec4 pos4 = { 0.0f, 0.0f, 0.0f, 1.0f };
+    if(resetAll){
+        for (size_t i = 0; i < activeCount; i++) {
+            glm_vec3_copy(pos4, positions_buff[i]);
+        }
+    }
+    else{
+        for (size_t i = 0; i < activeCount; i++) {
+            glm_vec3_copy(pos4, positions_buff[i]);
+        }
+    }
+}
+
+void reinit_simulation(Config *config, bool resetAll){
     spawnTimer = 0.0f;
-    activeCount = config->INIT_PARTICLES;
-    //init_vertex_buffers(&vao, &vbo, &ebo, config);
+    reset_buffer_pos(resetAll);
+    if(resetAll){
+        activeCount = config->INIT_PARTICLES;
+        init_particles(particles, config);
+    }
 }
 
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
@@ -369,9 +403,14 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
     }
     if (key == GLFW_KEY_R && action == GLFW_PRESS) {
         load_config(&config, "data/config.txt");
-        reinit_simulation(&config);
+        reinit_simulation(&config, true);
+    }
+
+    if (key == GLFW_KEY_C && action == GLFW_PRESS) {
+        change_env(&config);
     }
 }
+
 void processInputMovement(GLFWwindow* window, float deltaTime) {
     Camera* camera = glfwGetWindowUserPointer(window);
         float velocity = camera->MovementSpeed * deltaTime;
@@ -394,6 +433,7 @@ void processInputMovement(GLFWwindow* window, float deltaTime) {
         camera_process_keyboard(camera, CAMERA_LEFT,     deltaTime);
     if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
         camera_process_keyboard(camera, CAMERA_RIGHT,    deltaTime);
+
 }
 
 void mouse_callback(GLFWwindow* window, double xpos, double ypos)
